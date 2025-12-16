@@ -9,17 +9,17 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
 import io
 
-# ================= 1. Page Configuration =================
+# ================= 1. 页面配置 =================
 st.set_page_config(
     page_title="智能财务分析系统", 
     page_icon="📈",
     layout="wide"
 )
 
-# ================= 2. Core Logic Functions (Toolbox) =================
+# ================= 2. 核心逻辑函数 (通用工具箱) =================
 
 def set_cell_border(cell, **kwargs):
-    """Word Table Border Settings"""
+    """Word表格边框设置"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
@@ -37,16 +37,14 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 Generate Polished Word Table (With Smart Bold)"""
+    """🔥 生成精排版 Word 表格"""
     doc = Document()
     
-    # Global Font
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     style.font.size = Pt(10.5)
 
-    # Title
     heading = doc.add_heading(title, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in heading.runs:
@@ -64,12 +62,11 @@ def create_word_table_file(df, title="数据表"):
         for row in table.rows:
             row.cells[i].width = width
 
-    # --- Header Settings (Songti + Bold) ---
+    # 表头
     hdr_cells = table.rows[0].cells
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
-        # Top/Bottom Bold Borders
         set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         
@@ -78,14 +75,13 @@ def create_word_table_file(df, title="数据表"):
         for run in paragraph.runs:
             run.font.bold = True
             run.font.size = Pt(10.5)
-            run.font.name = 'Times New Roman' # English Times
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体') # Chinese Songti
+            run.font.name = 'SimHei'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
 
-    # --- Data Filling (With Total Row Bold Logic) ---
+    # 数据
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         
-        # 🔥 Determine if it is a total row
         subject_name = str(row[0])
         is_bold_row = "合计" in subject_name or "总计" in subject_name
 
@@ -98,8 +94,6 @@ def create_word_table_file(df, title="数据表"):
             
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             paragraph = cell.paragraphs[0]
-            
-            # Alignment
             if i == 0:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             else:
@@ -112,7 +106,6 @@ def create_word_table_file(df, title="数据表"):
                 run.font.size = Pt(9)
                 run.font.name = 'Times New Roman'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-                # 🔥 Bold if total row!
                 if is_bold_row:
                     run.font.bold = True
             
@@ -122,7 +115,7 @@ def create_word_table_file(df, title="数据表"):
     return bio
 
 def create_excel_file(df):
-    """Generate Excel"""
+    """生成 Excel"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='数据明细')
@@ -130,19 +123,31 @@ def create_excel_file(df):
     return output
 
 def load_single_word(file_obj):
-    """Read Word"""
+    """读取 Word (含格式错误拦截)"""
     try:
         file_obj.seek(0)
         doc = Document(file_obj)
         full_text = [p.text.strip() for p in doc.paragraphs if len(p.text.strip()) > 5]
-        return "\n".join(full_text), True
+        return "\n".join(full_text), True, ""
     except Exception as e:
-        if "is not a zip file" in str(e):
-            return f"❌ 格式错误：{file_obj.name} 不是标准 .docx，请另存为后上传。", False
-        return f"❌ 读取失败 {file_obj.name}: {e}", False
+        error_msg = str(e)
+        if "is not a zip file" in error_msg:
+            # 返回友好的错误提示
+            friendly_msg = (
+                f"❌ 【格式错误】文件：{file_obj.name}\n"
+                f"原因：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n"
+                f"👉 解决方法：\n"
+                f"1. 在电脑上用 Word 打开该文件。\n"
+                f"2. 点击左上角【文件】->【另存为】。\n"
+                f"3. 文件类型务必手动选择【Word 文档 (*.docx)】。\n"
+                f"4. 保存后，上传新的文件即可。"
+            )
+            return "", False, friendly_msg
+        else:
+            return "", False, f"❌ 读取失败 {file_obj.name}: {error_msg}"
 
 def find_context(subject, full_text):
-    """RAG Retrieval"""
+    """RAG 检索"""
     if not full_text: return ""
     clean_sub = subject.replace(" ", "")
     idx = full_text.find(clean_sub)
@@ -152,7 +157,7 @@ def find_context(subject, full_text):
     return full_text[start:end].replace('\n', ' ')
 
 def extract_date_label(header_str):
-    """Smartly extract date labels"""
+    """智能提取日期标签"""
     s = str(header_str).strip()
     match = re.search(r'[【\[](.*?)[】\]]', s)
     if match: return match.group(1)
@@ -164,17 +169,15 @@ def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
 def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_labels):
-    """
-    🔥 Core Generic Analysis Function
-    """
-    # Extract Key Rows
+    """通用分析函数"""
+    # 提取关键行
     try:
         total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
     except:
-        st.error(f"❌ 在表中未找到 '{total_col_name}' 行，请检查 Excel。")
+        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。")
         return
 
-    # Calculate Ratio
+    # 计算占比
     df = df_raw.copy()
     for period in ['T', 'T_1', 'T_2']:
         total = total_row[period]
@@ -183,21 +186,21 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
         else:
             df[f'占比_{period}'] = 0.0
 
-    # === Display Interface ===
+    # === 展示界面 ===
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
 
-    # 1. Detail Table
+    # 1. 明细表
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown(f"### {analysis_name}结构明细")
         
-        # Format Data
+        # 格式化数据
         display_df = df.copy()
         for p in ['T', 'T_1', 'T_2']:
             display_df[f'fmt_{p}'] = display_df[p].apply(lambda x: f"{x:,.2f}")
             display_df[f'fmt_pct_{p}'] = (display_df[f'占比_{p}'] * 100).apply(lambda x: f"{x:.2f}")
 
-        # Construct Final Table
+        # 构造最终表格
         d_t, d_t1, d_t2 = d_labels
         final_df = pd.DataFrame(index=display_df.index)
         final_df[f"{d_t}"] = display_df['fmt_T']
@@ -216,15 +219,12 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
         
         st.dataframe(final_df, use_container_width=True)
 
-    # 2. Overview Copy (Restored detailed logic!)
+    # 2. 综述文案
     with tab2:
         st.markdown("👇 **直接复制：**")
         top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
-        
-        # 🔥 Restored: Detailed Analysis Logic
         text = ""
         try:
-            # Try to get structural details if available
             if analysis_name == "资产":
                 curr_row = df_raw[df_raw.index.str.contains('流动资产合计')].iloc[0]
                 non_curr_row = df_raw[df_raw.index.str.contains('非流动资产合计')].iloc[0]
@@ -258,33 +258,21 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
                     f"从结构来看，主要构成项目包括：**{'、'.join(top_5)}** 等。"
                 )
             else:
-                # Fallback for generic
-                text = (
-                    f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n"
-                    f"从结构来看，主要构成项目包括：**{'、'.join(top_5)}** 等。"
-                )
-        except Exception:
-             # Fallback if specific rows not found
-             text = (
-                f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n"
-                f"从结构来看，主要构成项目包括：**{'、'.join(top_5)}** 等。"
-            )
-            
+                text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
+        except:
+             text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
+        
         st.code(text, language='text')
 
-    # 3. AI Instructions (Fixed display logic)
+    # 3. AI 指令
     with tab3:
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         
-        # Filter logic to show useful subjects
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[
             (df['占比_T'] > 0.01) & 
             (~df.index.str.contains('|'.join(exclude_list)))
         ].index.tolist()
-        
-        if not major_subjects:
-            st.info("没有占比超过1%的科目，暂无重点分析推荐。")
         
         for subject in major_subjects:
             row = df.loc[subject]
@@ -311,52 +299,66 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
 with st.sidebar:
     st.title("🎛️ 操控台")
     
-    # Navigation
-    st.markdown("### 1. 选择分析模块")
     analysis_page = st.radio(
         "请选择要生成的章节：",
         ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"]
     )
-    
     st.markdown("---")
     
-    # File Upload
-    st.markdown("### 2. 上传底稿")
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
     uploaded_word_files = st.file_uploader("Word 附注 (可选)", type=["docx"], accept_multiple_files=True)
     
     header_row = st.number_input("表头所在行 (默认2)", value=2)
-    
-    # Sheet Settings
     st.markdown("### 3. Excel Sheet 匹配")
     sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
     sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债表") 
 
-# ================= 4. Data Processing (Global) =================
-if uploaded_excel:
-    # 1. Process Word
+# ================= 4. Main Logic =================
+
+# 🔥 核心状态切换逻辑
+if not uploaded_excel:
+    # 状态 A：未上传文件 -> 显示首页引导 (参考了你的截图)
+    st.title("📊 财务分析报告自动化助手")
+    
+    st.markdown("""
+    ### 💡 使用说明：
+    1. **上传 Excel 底稿 (必须)**：请在左侧侧边栏上传。
+    2. **上传 Word 附注 (可选)**：支持上传多个 Word 文件，用于生成原因分析。
+    3. **自动计算与生成**：系统会自动提取数据，生成 **数据表格**、**综述文案** 和 **AI 指令**。
+    4. **一键导出**：支持导出 **精排版 Word 表格**，直接粘贴到报告中。
+    """)
+    
+    st.info("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
+
+else:
+    # 状态 B：已上传文件 -> 显示分析结果
+    
+    # 1. 预处理 Word (含报错显示)
     word_text_all = ""
+    word_error_msgs = []
+    
     if uploaded_word_files:
         for w in uploaded_word_files:
-            content, success = load_single_word(w) 
+            content, success, err_msg = load_single_word(w) 
             if success:
                 word_text_all += f"\n【来源：{w.name}】\n{content}"
             else:
-                st.sidebar.error(content)
+                word_error_msgs.append(err_msg)
+    
+    # 🔥 如果有 Word 错误，在主界面顶部醒目显示
+    if word_error_msgs:
+        for msg in word_error_msgs:
+            st.error(msg)
+    elif uploaded_word_files:
+        st.success("✅ 所有 Excel 和 Word 文件均读取成功！")
 
-    # 2. Generic Excel Reader
+    # 2. 通用 Excel 读取器 (含报错显示)
     def get_clean_data(sheet_name):
         try:
             df = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
             df = df.iloc[:, [0, 4, 5, 6]]
             orig_cols = df.columns.tolist()
-            
-            # Extract date labels
-            d_labels = [
-                extract_date_label(orig_cols[1]), 
-                extract_date_label(orig_cols[2]), 
-                extract_date_label(orig_cols[3])
-            ]
+            d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
             
             df.columns = ['科目', 'T', 'T_1', 'T_2']
             df = df.dropna(subset=['科目'])
@@ -364,35 +366,29 @@ if uploaded_excel:
             for c in ['T', 'T_1', 'T_2']:
                 df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             df.set_index('科目', inplace=True)
-            return df, d_labels
+            return df, d_labels, None
         except Exception as e:
-            return None, None
+            return None, None, str(e)
 
-    # ================= 5. Routing Logic =================
-    
+    # 3. 页面路由逻辑
     st.header(f"📊 {analysis_page}")
 
-    # --- Page 1: Asset Analysis ---
     if analysis_page == "(一) 资产结构分析":
-        df_asset, d_labels = get_clean_data(sheet_asset)
+        df_asset, d_labels, err = get_clean_data(sheet_asset)
         if df_asset is not None:
             process_analysis_tab(df_asset, word_text_all, "资产总计", "资产", d_labels)
         else:
-            st.error(f"❌ 读取失败。请检查侧边栏中【资产表 Sheet 名】是否填写正确（当前填写为：{sheet_asset}）。")
+            st.error(f"❌ 读取 Excel 失败：{err}\n请检查【资产表 Sheet 名】是否为：{sheet_asset}")
 
-    # --- Page 2: Liability Analysis ---
     elif analysis_page == "(二) 负债结构分析":
-        df_liab, d_labels = get_clean_data(sheet_liab)
+        df_liab, d_labels, err = get_clean_data(sheet_liab)
         if df_liab is not None:
             total_name = "负债合计" 
             if not df_liab.index.str.contains(total_name).any():
                 total_name = "负债总计"
             process_analysis_tab(df_liab, word_text_all, total_name, "负债", d_labels)
         else:
-            st.warning(f"⚠️ 尚未找到 Sheet：{sheet_liab}。请在 Excel 中确认负债表的名字，并在侧边栏修改。")
+            st.error(f"❌ 读取 Excel 失败：{err}\n请检查【负债表 Sheet 名】是否为：{sheet_liab}")
 
     else:
         st.info("🚧 该模块正在施工中，敬请期待后续更新...")
-
-else:
-    st.info("👈 请在左侧上传 Excel 文件开始。")
