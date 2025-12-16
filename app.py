@@ -77,7 +77,8 @@ def safe_pct(num, denom):
 # ================= 4. 主程序逻辑 =================
 
 if uploaded_excel:
-    st.success("✅ Excel 上传成功！正在生成分析指令...")
+    # 🌟 修改点 1：文案优化 - 明确告知用户分析已完成
+    st.success("✅ 分析完成！已生成数据综述与 AI 指令，请查看下方结果。")
     
     try:
         # --- 1. 读取并处理 Excel ---
@@ -164,7 +165,7 @@ if uploaded_excel:
             )
             st.code(text_overview, language='text')
 
-        # --- Tab 3: AI 指令 (核心功能) ---
+        # --- Tab 3: AI 指令 (核心优化点) ---
         with tab3:
             st.subheader("🤖 重点科目分析指令 (Copilot 模式)")
             st.caption("👉 点击代码块右上角的 **📄 复制**，粘贴给 DeepSeek 或 ChatGPT。")
@@ -183,16 +184,23 @@ if uploaded_excel:
                 
                 diff = v_t - v_t1
                 pct = safe_pct(diff, v_t1)
-                direction = "增加" if diff >= 0 else "减少"
                 
-                # 基础数据
+                # 🌟 修改点 2：智能判断增幅还是降幅
+                if diff >= 0:
+                    direction = "增加"
+                    pct_label = "增幅"
+                else:
+                    direction = "减少"
+                    pct_label = "降幅"
+                
+                # 基础数据 (Prompt) - 这里用了 pct_label 变量
                 prompt_base = f"""【任务】：请分析“{subject}”的变动情况。
 
 【1. 财务具体科目数据 (Trend)】
 {d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{v_t2:,.2f}万元、{v_t1:,.2f}万元和{v_t:,.2f}万元，占总资产的比例分别为{r_t2:.2f}%、{r_t1:.2f}%和{r_t:.2f}%。
 
 【2. 财务硬数据变动 (Analysis)】
-截至{d_t}，发行人{subject}较{d_t1}{direction}{abs(diff):,.2f}万元，增幅/降幅为{abs(pct):.2f}%。"""
+截至{d_t}，发行人{subject}较{d_t1}{direction}{abs(diff):,.2f}万元，{pct_label}为{abs(pct):.2f}%。"""
 
                 # 智能组合
                 if has_word:
@@ -203,7 +211,9 @@ if uploaded_excel:
 {context}
 
 【4. 写作指令】
-请结合1、2、3写一段分析。如果Part 3没提到具体原因，请直接写“主要系业务规模变动所致”，严禁瞎编。"""
+1. 请将上述数据整理成一段通顺的财务分析文字。
+2. 紧接着，请根据第3部分分析变动原因（即“主要系...所致”）。
+3. 如果Part 3没提到具体原因，请直接写“主要系业务规模变动所致”，严禁瞎编。"""
                 else:
                     prompt_final = prompt_base + "\n\n【指令】请将上述数据整理成一段通顺的财务分析文字。"
 
