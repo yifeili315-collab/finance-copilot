@@ -4,7 +4,8 @@ import re
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_PARAGRAPH_ALIGNMENT
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT # 垂直对齐
 from docx.oxml import OxmlElement
 import io
 
@@ -89,6 +90,10 @@ def create_word_table_file(df, title="数据表"):
         cell = hdr_cells[i]
         cell.text = str(col_name)
         set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
+        
+        # 垂直居中
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in paragraph.runs:
@@ -107,12 +112,20 @@ def create_word_table_file(df, title="数据表"):
             if r_idx == len(export_df) - 1:
                  set_cell_border(cell, bottom={"val": "single", "sz": 12})
 
+            # 垂直居中 🔥
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
             paragraph = cell.paragraphs[0]
+            # 水平对齐：第一列居中，其他居右
             if i == 0:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             else:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            cell.vertical_alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # 设置行间距为单倍，防止偏上
+            paragraph_format = paragraph.paragraph_format
+            paragraph_format.space_before = Pt(2)
+            paragraph_format.space_after = Pt(2)
 
             for run in paragraph.runs:
                 run.font.size = Pt(9)
@@ -136,7 +149,6 @@ def load_single_word(file_obj):
         return f"❌ 读取失败：{file_obj.name}", False
 
 def create_excel_file(df):
-    """生成 Excel 文件 (保持字符串格式，确保所见即所得)"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='资产明细')
@@ -152,12 +164,24 @@ def find_context(subject, full_text):
     end = min(len(full_text), idx + 1200) 
     return full_text[start:end].replace('\n', ' ')
 
-def clean_date_label(header_str):
-    s = str(header_str).replace('\n', '')
+def extract_date_label(header_str):
+    """
+    🔥 智能提取表头日期：
+    优先提取括号【】或 [] 里的内容。
+    如果都没有，才尝试提取年份。
+    """
+    s = str(header_str).strip()
+    # 1. 尝试提取 【】 或 [] 里的内容
+    match = re.search(r'[【\[](.*?)[】\]]', s)
+    if match:
+        return match.group(1) # 返回括号里的内容，例如 2025S1
+    
+    # 2. 如果没有括号，尝试提取年份
     year = re.search(r'(\d{4})', s)
-    y_str = year.group(1) if year else "T"
-    suffix = "6月末" if ("一期" in s or "6月" in s) else "年末"
-    return f"{y_str}年{suffix}"
+    if year:
+        return f"{year.group(1)}年"
+        
+    return s # 实在找不到就返回原样
 
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
@@ -181,10 +205,10 @@ if uploaded_excel:
         df = df.iloc[:, [0, 4, 5, 6]]
         orig_cols = df.columns.tolist()
         
-        # 动态获取日期列名
-        d_t = clean_date_label(orig_cols[1])
-        d_t1 = clean_date_label(orig_cols[2])
-        d_t2 = clean_date_label(orig_cols[3])
+        # 🔥 动态提取表头日期
+        d_t = extract_date_label(orig_cols[1])
+        d_t1 = extract_date_label(orig_cols[2])
+        d_t2 = extract_date_label(orig_cols[3])
         
         df.columns = ['科目', 'T', 'T_1', 'T_2']
         
@@ -213,28 +237,25 @@ if uploaded_excel:
             c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
             with c1: st.markdown("### 资产结构明细")
             
-            # 🔥 核心修改：统一格式化
             display_df = df.copy()
             
-            # 1. 格式化金额：带千分位，保留2位小数 (例: 1,234.56)
             for p in ['T', 'T_1', 'T_2']:
                 display_df[f'fmt_{p}'] = display_df[p].apply(lambda x: f"{x:,.2f}")
-            
-            # 2. 格式化占比：乘100，保留2位小数，不带% (例: 12.34)
             for p in ['T', 'T_1', 'T_2']:
                 display_df[f'fmt_pct_{p}'] = (display_df[f'占比_{p}'] * 100).apply(lambda x: f"{x:.2f}")
 
-            # 3. 构造最终展示的 DataFrame (重命名+排序)
+            # 构造最终表格
             final_df = pd.DataFrame(index=display_df.index)
-            # T期
-            final_df[f"{d_t} 金额"] = display_df['fmt_T']
-            final_df[f"{d_t} 占比(%)"] = display_df['fmt_pct_T']
-            # T-1期
-            final_df[f"{d_t1} 金额"] = display_df['fmt_T_1']
-            final_df[f"{d_t1} 占比(%)"] = display_df['fmt_pct_T_1']
-            # T-2期
-            final_df[f"{d_t2} 金额"] = display_df['fmt_T_2']
-            final_df[f"{d_t2} 占比(%)"] = display_df['fmt_pct_T_2']
+            
+            # 🔥 表头优化：金额列显示日期，占比列直接写 "占比(%)"
+            final_df[f"{d_t}"] = display_df['fmt_T']
+            final_df["占比(%) "] = display_df['fmt_pct_T'] # 加空格防止重名
+            
+            final_df[f"{d_t1}"] = display_df['fmt_T_1']
+            final_df["占比(%)"] = display_df['fmt_pct_T_1']
+            
+            final_df[f"{d_t2}"] = display_df['fmt_T_2']
+            final_df[" 占比(%)"] = display_df['fmt_pct_T_2'] # 加前置空格防止重名
 
             with c2:
                 doc_file = create_word_table_file(final_df, title="资产结构情况表")
@@ -244,7 +265,6 @@ if uploaded_excel:
                 excel_file = create_excel_file(final_df)
                 st.download_button("📥 下载 Excel", excel_file, "资产结构明细.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
-            # 🔥 网页直接展示 final_df，所见即所得
             st.dataframe(final_df, use_container_width=True)
 
         with tab2:
