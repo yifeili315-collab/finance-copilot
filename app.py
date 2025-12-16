@@ -44,7 +44,6 @@ with st.sidebar:
 def load_single_word(file_obj):
     """读取单个 Word 文件流 (含智能错误提示)"""
     try:
-        # 确保指针在文件开头
         file_obj.seek(0)
         doc = Document(file_obj)
         full_text = []
@@ -52,19 +51,14 @@ def load_single_word(file_obj):
             clean = para.text.strip()
             if len(clean) > 5:
                 full_text.append(clean)
-        return "\n".join(full_text), True  # 返回 (内容, 是否成功)
+        return "\n".join(full_text), True 
     except Exception as e:
         error_msg = str(e)
-        # 🔥 核心修改：拦截特定错误，返回人话提示
         if "is not a zip file" in error_msg:
             friendly_msg = (
                 f"❌ 【格式错误】文件：{file_obj.name}\n"
-                f"原因：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n"
-                f"👉 解决方法：\n"
-                f"1. 在电脑上用 Word 打开该文件。\n"
-                f"2. 点击左上角【文件】->【另存为】。\n"
-                f"3. 文件类型务必手动选择【Word 文档 (*.docx)】。\n"
-                f"4. 保存后，上传新的文件即可。"
+                f"原因：这是一个“伪装”的 .docx 文件。\n"
+                f"👉 解决方法：请在电脑上用 Word 打开，另存为标准 .docx 格式后再上传。"
             )
             return friendly_msg, False
         else:
@@ -96,7 +90,7 @@ def safe_pct(num, denom):
 
 if uploaded_excel:
     
-    # 先处理 Word，如果有错误直接在顶部报错
+    # Word 处理逻辑
     word_text_all = ""
     has_word = False
     word_error_list = []
@@ -109,18 +103,16 @@ if uploaded_excel:
                 word_text_all += f"\n\n【--- 内容来自文件：{w_file.name} ---】\n"
                 word_text_all += content
             else:
-                # 收集错误信息
                 word_error_list.append(content)
     
-    # 🌟 UI 反馈区：如果有错误，直接弹红框
     if word_error_list:
         for err in word_error_list:
             st.error(err)
-        st.warning("⚠️ 部分 Word 文件读取失败，生成的指令可能不包含完整原因分析。请按上述提示修复文件后重新上传。")
+        st.warning("⚠️ 部分 Word 文件读取失败，分析结果可能不完整。")
     elif uploaded_word_files:
-        st.success("✅ 所有 Excel 和 Word 文件均读取成功！分析结果见下方。")
+        st.success("✅ 所有 Excel 和 Word 文件均读取成功！")
     else:
-        st.success("✅ Excel 读取成功！(未上传 Word，仅进行纯数据分析)")
+        st.success("✅ Excel 读取成功！(未上传 Word)")
 
     try:
         # --- 1. 读取并处理 Excel ---
@@ -151,11 +143,14 @@ if uploaded_excel:
             st.error("❌ 未找到 '资产总计' 等关键行，请检查 Excel 科目名称。")
             st.stop()
             
-        # 计算 T 期占比
-        if total_assets['T'] != 0:
-            df['占比_T'] = df['T'] / total_assets['T']
-        else:
-            df['占比_T'] = 0.0
+        # 计算三期占比
+        for period in ['T', 'T_1', 'T_2']:
+            total = total_assets[period]
+            col_name = f'占比_{period}'
+            if total != 0:
+                df[col_name] = df[period] / total
+            else:
+                df[col_name] = 0.0
 
         # ================= 5. 结果展示 =================
         
@@ -163,11 +158,19 @@ if uploaded_excel:
         
         # --- Tab 1: 明细表 ---
         with tab1:
-            st.markdown("### 资产结构明细")
+            st.markdown("### 资产结构明细 (含三期占比)")
             display_df = df.copy()
+            
+            # 格式化百分比
             display_df['占比_T(%)'] = (display_df['占比_T'] * 100).apply(lambda x: f"{x:.2f}%")
+            display_df['占比_T_1(%)'] = (display_df['占比_T_1'] * 100).apply(lambda x: f"{x:.2f}%")
+            display_df['占比_T_2(%)'] = (display_df['占比_T_2'] * 100).apply(lambda x: f"{x:.2f}%")
+            
+            # 🔥 修改点：调整列的显示顺序
+            show_cols = ['T', '占比_T(%)', 'T_1', '占比_T_1(%)', 'T_2', '占比_T_2(%)']
+            
             st.dataframe(
-                display_df[['T', 'T_1', 'T_2', '占比_T(%)']].style.format(
+                display_df[show_cols].style.format(
                     subset=['T', 'T_1', 'T_2'], 
                     formatter="{:,.2f}"
                 )
