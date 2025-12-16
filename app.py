@@ -15,7 +15,7 @@ st.title("📊 财务分析报告自动化助手")
 st.markdown("""
 **💡 使用说明：**
 1. 上传 **Excel 底稿**（必须）。
-2. 上传 **Word 附注**（可选，用于生成原因分析）。
+2. 上传 **Word 附注**（可选，**支持同时传多个**，如：23年附注+24年附注）。
 3. 系统会自动计算数据，生成 **数据分析语料**。
 4. 点击右上角的 **📄 复制按钮**，发送给 AI 或直接使用。
 """)
@@ -27,8 +27,13 @@ with st.sidebar:
     # 1. Excel (必须)
     uploaded_excel = st.file_uploader("1. 上传 Excel 底稿 (必须)", type=["xlsx", "xlsm"])
     
-    # 2. Word (可选)
-    uploaded_word = st.file_uploader("2. 上传 Word 附注 (可选)", type=["docx"], help="如果上传，分析将包含原因；如果不传，只生成数据描述。")
+    # 2. Word (可选，支持多文件)
+    uploaded_word_files = st.file_uploader(
+        "2. 上传 Word 附注 (可选)", 
+        type=["docx"], 
+        accept_multiple_files=True, # 🔥 关键修改：允许选多个文件
+        help="支持按住 Ctrl/Command 键多选文件，或者多次拖入。"
+    )
     
     st.info("💡 提示：数据只在浏览器本地处理，不会上传给第三方 AI，绝对安全。")
     
@@ -37,9 +42,8 @@ with st.sidebar:
 
 # ================= 3. 核心逻辑函数 =================
 
-def load_word_context(file_obj):
-    """读取 Word 文件流"""
-    if file_obj is None: return ""
+def load_single_word(file_obj):
+    """读取单个 Word 文件流"""
     try:
         doc = Document(file_obj)
         full_text = []
@@ -49,8 +53,7 @@ def load_word_context(file_obj):
                 full_text.append(clean)
         return "\n".join(full_text)
     except Exception as e:
-        st.error(f"Word 读取失败: {e}")
-        return ""
+        return f"（文件 {file_obj.name} 读取失败: {e}）"
 
 def find_context(subject, full_text):
     """RAG 检索"""
@@ -58,8 +61,9 @@ def find_context(subject, full_text):
     clean_sub = subject.replace(" ", "")
     idx = full_text.find(clean_sub)
     if idx == -1: return "（附注中未检索到该科目名称）"
+    # 截取前后文，因为文本变长了，稍微扩大一点范围
     start = max(0, idx - 600)
-    end = min(len(full_text), idx + 1000)
+    end = min(len(full_text), idx + 1200) 
     return full_text[start:end].replace('\n', ' ')
 
 def clean_date_label(header_str):
@@ -114,15 +118,21 @@ if uploaded_excel:
         else:
             df['占比_T'] = 0.0
         
-        # --- 2. 尝试读取 Word ---
-        word_text = ""
+        # --- 2. 处理 Word (支持多文件合并) ---
+        word_text_all = ""
         has_word = False
-        if uploaded_word:
-            word_text = load_word_context(uploaded_word)
-            if word_text:
-                has_word = True
-            else:
-                st.warning("Word 文件为空或读取失败，将生成纯数据指令。")
+        
+        if uploaded_word_files:
+            has_word = True
+            # 循环读取每个文件
+            for w_file in uploaded_word_files:
+                content = load_single_word(w_file)
+                # 🔥 拼接时加上文件名标记，方便区分来源
+                word_text_all += f"\n\n【--- 以下内容来自文件：{w_file.name} ---】\n"
+                word_text_all += content
+        else:
+            # 如果没传文件，保持空字符串
+            pass
 
         # ================= 5. 结果展示 =================
         
@@ -184,7 +194,6 @@ if uploaded_excel:
                 diff = v_t - v_t1
                 pct = safe_pct(diff, v_t1)
                 
-                # 智能词汇逻辑
                 if diff >= 0:
                     direction = "增加"
                     pct_label = "增幅"
@@ -192,7 +201,6 @@ if uploaded_excel:
                     direction = "减少"
                     pct_label = "降幅"
                 
-                # 基础数据 (Prompt)
                 prompt_base = f"""【任务】：请分析“{subject}”的变动情况。
 
 【1. 财务具体科目数据 (Trend)】
@@ -201,9 +209,9 @@ if uploaded_excel:
 【2. 财务硬数据变动 (Analysis)】
 截至{d_t}，发行人{subject}较{d_t1}{direction}{abs(diff):,.2f}万元，{pct_label}为{abs(pct):.2f}%。"""
 
-                # 智能组合
                 if has_word:
-                    context = find_context(subject, word_text)
+                    # 在合并后的所有文本中查找
+                    context = find_context(subject, word_text_all)
                     prompt_final = prompt_base + f"""
 
 【3. Word 附注软信息 (Context)】
@@ -212,7 +220,6 @@ if uploaded_excel:
 【4. 写作指令】
 请结合上述数据和附注，分析变动原因（即“主要系...所致”）。如果附注中未提及，请写“主要系业务规模变动所致”。"""
                 else:
-                    # 无 Word 时，只给纯数据，不给指令
                     prompt_final = prompt_base 
 
                 with st.expander(f"📌 {subject} (占比 {r_t:.2f}%)"):
