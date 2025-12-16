@@ -17,7 +17,7 @@ st.markdown("""
 1. 上传 **Excel 底稿**（必须）。
 2. 上传 **Word 附注**（可选，支持多文件）。
 3. 系统会自动计算数据，生成 **数据分析语料**。
-4. 点击右上角的 **📄 复制按钮**，发送给 AI 或直接使用。
+4. 点击表格上方的 **📥 下载 Word 表格** 按钮，获得可直接粘贴的文件。
 """)
 
 # ================= 2. 侧边栏：文件上传 =================
@@ -63,6 +63,35 @@ def load_single_word(file_obj):
             return friendly_msg, False
         else:
             return f"❌ 文件 {file_obj.name} 读取失败: {error_msg}", False
+
+def create_word_table_file(df, title="数据表"):
+    """🔥 将 DataFrame 转换为 Word 表格文件流"""
+    doc = Document()
+    doc.add_heading(title, level=1)
+    
+    # 转换数据：将索引（科目）变成第一列
+    export_df = df.reset_index()
+    
+    # 创建表格
+    table = doc.add_table(rows=1, cols=len(export_df.columns))
+    table.style = 'Table Grid' # 使用标准网格样式
+    
+    # 写入表头
+    hdr_cells = table.rows[0].cells
+    for i, col_name in enumerate(export_df.columns):
+        hdr_cells[i].text = str(col_name)
+    
+    # 写入数据行
+    for _, row in export_df.iterrows():
+        row_cells = table.add_row().cells
+        for i, val in enumerate(row):
+            row_cells[i].text = str(val)
+            
+    # 保存到内存
+    bio = io.BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio
 
 def find_context(subject, full_text):
     """RAG 检索"""
@@ -158,7 +187,10 @@ if uploaded_excel:
         
         # --- Tab 1: 明细表 ---
         with tab1:
-            st.markdown("### 资产结构明细 (含三期占比)")
+            col_a, col_b = st.columns([3, 1])
+            with col_a:
+                st.markdown("### 资产结构明细 (含三期占比)")
+            
             display_df = df.copy()
             
             # 格式化百分比
@@ -166,11 +198,22 @@ if uploaded_excel:
             display_df['占比_T_1(%)'] = (display_df['占比_T_1'] * 100).apply(lambda x: f"{x:.2f}%")
             display_df['占比_T_2(%)'] = (display_df['占比_T_2'] * 100).apply(lambda x: f"{x:.2f}%")
             
-            # 🔥 修改点：调整列的显示顺序
             show_cols = ['T', '占比_T(%)', 'T_1', '占比_T_1(%)', 'T_2', '占比_T_2(%)']
+            final_df = display_df[show_cols] # 准备用于展示和下载的DataFrame
+
+            with col_b:
+                # 🔥 核心功能：生成 Word 文件并提供下载
+                doc_file = create_word_table_file(final_df, title="资产结构明细表")
+                st.download_button(
+                    label="📥 下载 Word 表格",
+                    data=doc_file,
+                    file_name="资产结构明细表.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    help="点击下载 .docx 文件，可直接复制表格到你的报告中。"
+                )
             
             st.dataframe(
-                display_df[show_cols].style.format(
+                final_df.style.format(
                     subset=['T', 'T_1', 'T_2'], 
                     formatter="{:,.2f}"
                 )
