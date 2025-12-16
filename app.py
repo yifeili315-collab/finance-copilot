@@ -5,7 +5,7 @@ from docx import Document
 from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.oxml import OxmlElement
 import io
 
@@ -31,20 +31,22 @@ def set_cell_border(cell, **kwargs):
                 tcPr.append(tcBorders)
             border = OxmlElement(f'w:{border_name}')
             border.set(qn('w:val'), edge.get('val', 'single'))
-            border.set(qn('w:sz'), str(edge.get('sz', 4)))
+            border.set(qn('w:sz'), str(edge.get('sz', 4))) # 4 = 0.5pt, 12 = 1.5pt
             border.set(qn('w:space'), str(edge.get('space', 0)))
             border.set(qn('w:color'), edge.get('color', 'auto'))
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 生成精排版 Word 表格"""
+    """🔥 生成精排版 Word 表格 (严格按照你的参数)"""
     doc = Document()
     
+    # 全局字体
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     style.font.size = Pt(10.5)
 
+    # 标题
     heading = doc.add_heading(title, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in heading.runs:
@@ -62,45 +64,73 @@ def create_word_table_file(df, title="数据表"):
         for row in table.rows:
             row.cells[i].width = width
 
-    # 表头
+    # --- 1. 表头设置 ---
     hdr_cells = table.rows[0].cells
+    # 设置表头行高 (最小值 0.6cm)
+    table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    table.rows[0].height = Cm(0.6)
+
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
-        set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
+        
+        # 边框: 上下1.5磅(sz=12)，左右0.5磅(sz=4)
+        set_cell_border(cell, 
+                        top={"val": "single", "sz": 12}, 
+                        bottom={"val": "single", "sz": 12}, 
+                        left={"val": "single", "sz": 4}, 
+                        right={"val": "single", "sz": 4})
+        
+        # 垂直居中 🔥
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # 单倍行距，防止贴顶
+        paragraph.paragraph_format.line_spacing = 1.0 
+        paragraph.paragraph_format.space_before = Pt(2) # 微调
+        paragraph.paragraph_format.space_after = Pt(2)  # 微调
+
         for run in paragraph.runs:
             run.font.bold = True
             run.font.size = Pt(10.5)
-            run.font.name = 'SimHei'
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+            run.font.name = 'Times New Roman'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
-    # 数据
+    # --- 2. 数据填充 ---
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
-        
+        table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+        table.rows[r_idx+1].height = Cm(0.6) # 行高最小值 0.6cm
+
         subject_name = str(row[0])
         is_bold_row = "合计" in subject_name or "总计" in subject_name
 
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val)
-            set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": 4}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
-            if r_idx == len(export_df) - 1:
-                 set_cell_border(cell, bottom={"val": "single", "sz": 12})
+            
+            # 边框: 上细，下细(最后一行下粗)，左右细
+            bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
+            set_cell_border(cell, 
+                            top={"val": "single", "sz": 4}, 
+                            bottom={"val": "single", "sz": bottom_sz}, 
+                            left={"val": "single", "sz": 4}, 
+                            right={"val": "single", "sz": 4})
             
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             paragraph = cell.paragraphs[0]
+            
             if i == 0:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             else:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(2)
+            # 单倍行距
+            paragraph.paragraph_format.line_spacing = 1.0
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
 
             for run in paragraph.runs:
                 run.font.size = Pt(9)
@@ -132,7 +162,6 @@ def load_single_word(file_obj):
     except Exception as e:
         error_msg = str(e)
         if "is not a zip file" in error_msg:
-            # 返回友好的错误提示
             friendly_msg = (
                 f"❌ 【格式错误】文件：{file_obj.name}\n"
                 f"原因：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n"
@@ -170,14 +199,12 @@ def safe_pct(num, denom):
 
 def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_labels):
     """通用分析函数"""
-    # 提取关键行
     try:
         total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
     except:
         st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。")
         return
 
-    # 计算占比
     df = df_raw.copy()
     for period in ['T', 'T_1', 'T_2']:
         total = total_row[period]
@@ -194,13 +221,11 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown(f"### {analysis_name}结构明细")
         
-        # 格式化数据
         display_df = df.copy()
         for p in ['T', 'T_1', 'T_2']:
             display_df[f'fmt_{p}'] = display_df[p].apply(lambda x: f"{x:,.2f}")
             display_df[f'fmt_pct_{p}'] = (display_df[f'占比_{p}'] * 100).apply(lambda x: f"{x:.2f}")
 
-        # 构造最终表格
         d_t, d_t1, d_t2 = d_labels
         final_df = pd.DataFrame(index=display_df.index)
         final_df[f"{d_t}"] = display_df['fmt_T']
@@ -264,8 +289,9 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
         
         st.code(text, language='text')
 
-    # 3. AI 指令
+    # 3. AI 指令 (🔥 增加了顶部提示词)
     with tab3:
+        st.info(f"💡 **提示**：以下是基于 **{d_t} (最新一期)** 占比前列的科目生成的分析指令。")
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         
         exclude_list = ['合计', '总计', '总额']
@@ -315,11 +341,8 @@ with st.sidebar:
 
 # ================= 4. Main Logic =================
 
-# 🔥 核心状态切换逻辑
 if not uploaded_excel:
-    # 状态 A：未上传文件 -> 显示首页引导 (参考了你的截图)
     st.title("📊 财务分析报告自动化助手")
-    
     st.markdown("""
     ### 💡 使用说明：
     1. **上传 Excel 底稿 (必须)**：请在左侧侧边栏上传。
@@ -327,13 +350,9 @@ if not uploaded_excel:
     3. **自动计算与生成**：系统会自动提取数据，生成 **数据表格**、**综述文案** 和 **AI 指令**。
     4. **一键导出**：支持导出 **精排版 Word 表格**，直接粘贴到报告中。
     """)
-    
     st.info("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
 else:
-    # 状态 B：已上传文件 -> 显示分析结果
-    
-    # 1. 预处理 Word (含报错显示)
     word_text_all = ""
     word_error_msgs = []
     
@@ -345,14 +364,12 @@ else:
             else:
                 word_error_msgs.append(err_msg)
     
-    # 🔥 如果有 Word 错误，在主界面顶部醒目显示
     if word_error_msgs:
         for msg in word_error_msgs:
             st.error(msg)
     elif uploaded_word_files:
         st.success("✅ 所有 Excel 和 Word 文件均读取成功！")
 
-    # 2. 通用 Excel 读取器 (含报错显示)
     def get_clean_data(sheet_name):
         try:
             df = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
@@ -370,7 +387,6 @@ else:
         except Exception as e:
             return None, None, str(e)
 
-    # 3. 页面路由逻辑
     st.header(f"📊 {analysis_page}")
 
     if analysis_page == "(一) 资产结构分析":
