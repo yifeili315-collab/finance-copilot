@@ -33,32 +33,34 @@ def set_cell_border(cell, **kwargs):
             
             border = OxmlElement(f'w:{border_name}')
             border.set(qn('w:val'), edge.get('val', 'single'))
-            border.set(qn('w:sz'), str(edge.get('sz', 4))) # 4=0.5pt, 12=1.5pt
+            border.set(qn('w:sz'), str(edge.get('sz', 4)))
             border.set(qn('w:space'), str(edge.get('space', 0)))
             border.set(qn('w:color'), edge.get('color', 'auto'))
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 生成精排版 Word 表格 (严格网格 + 粗外框)"""
+    """🔥 生成精排版 Word 表格 (纯正宋体版)"""
     doc = Document()
     
-    # 全局字体
+    # 全局字体设置
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     style.font.size = Pt(10.5)
 
-    # 标题
+    # --- 1. 文档大标题设置 ---
     heading = doc.add_heading(title, level=1)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in heading.runs:
-        run.font.name = 'SimHei'
-        run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
-        run.font.color.rgb = None
+        run.font.name = 'Times New Roman'
+        # 🔥 修改点：改为宋体
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+        # 🔥 修改点：加粗
+        run.font.bold = True
+        run.font.color.rgb = None # 黑色
 
     export_df = df.reset_index()
     
-    # 创建表格 (注意：不要设置 style='Table Grid'，否则会覆盖自定义边框)
     table = doc.add_table(rows=1, cols=len(export_df.columns))
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
@@ -68,7 +70,7 @@ def create_word_table_file(df, title="数据表"):
         for row in table.rows:
             row.cells[i].width = width
 
-    # --- 1. 表头设置 ---
+    # --- 2. 表头设置 (第一行) ---
     hdr_cells = table.rows[0].cells
     table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
     table.rows[0].height = Cm(0.6)
@@ -77,8 +79,7 @@ def create_word_table_file(df, title="数据表"):
         cell = hdr_cells[i]
         cell.text = str(col_name)
         
-        # 边框逻辑：表头上下粗(1.5pt)，左右如果是边界则粗，中间细
-        # sz=12 (1.5pt), sz=4 (0.5pt)
+        # 边框: 上下粗(1.5pt), 左右细
         top_sz = 12
         bottom_sz = 12 
         left_sz = 12 if i == 0 else 4
@@ -94,7 +95,6 @@ def create_word_table_file(df, title="数据表"):
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # 单倍行距
         paragraph.paragraph_format.line_spacing = 1.0 
         paragraph.paragraph_format.space_before = Pt(0) 
         paragraph.paragraph_format.space_after = Pt(0)  
@@ -102,10 +102,11 @@ def create_word_table_file(df, title="数据表"):
         for run in paragraph.runs:
             run.font.bold = True
             run.font.size = Pt(10.5)
-            run.font.name = 'SimHei'
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+            run.font.name = 'Times New Roman'
+            # 🔥 修改点：表头也改为宋体 (之前是黑体)
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
-    # --- 2. 数据填充 ---
+    # --- 3. 数据填充 ---
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
@@ -117,12 +118,6 @@ def create_word_table_file(df, title="数据表"):
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val)
-            
-            # 边框逻辑：
-            # 上：细 (因为表头或上一行已经画了下边框，这里主要控制左、右、下)
-            # 下：最后一行粗(12)，其他细(4)
-            # 左：第一列粗(12)，其他细(4)
-            # 右：最后一列粗(12)，其他细(4)
             
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             left_sz = 12 if i == 0 else 4
@@ -176,7 +171,6 @@ def load_single_word(file_obj):
     except Exception as e:
         error_msg = str(e)
         if "is not a zip file" in error_msg:
-            # 🔥 这里的排版已经调整，解决了对齐问题
             friendly_msg = (
                 f"❌ **【格式错误】** 文件：{file_obj.name}\n\n"
                 f"**原因**：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n\n"
@@ -306,7 +300,6 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
 
     # 3. AI 指令
     with tab3:
-        # 🔥 新增提示
         st.info(f"💡 **提示**：以下是基于 **{d_t} (最新一期)** 占比前列的科目生成的分析指令。")
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         
