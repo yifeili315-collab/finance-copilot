@@ -15,7 +15,7 @@ st.title("📊 财务分析报告自动化助手")
 st.markdown("""
 **💡 使用说明：**
 1. 上传 **Excel 底稿**（必须）。
-2. 上传 **Word 附注**（可选，**支持同时传多个**，如：23年附注+24年附注）。
+2. 上传 **Word 附注**（可选，支持多文件）。
 3. 系统会自动计算数据，生成 **数据分析语料**。
 4. 点击右上角的 **📄 复制按钮**，发送给 AI 或直接使用。
 """)
@@ -31,29 +31,44 @@ with st.sidebar:
     uploaded_word_files = st.file_uploader(
         "2. 上传 Word 附注 (可选)", 
         type=["docx"], 
-        accept_multiple_files=True, # 🔥 关键修改：允许选多个文件
+        accept_multiple_files=True,
         help="支持按住 Ctrl/Command 键多选文件，或者多次拖入。"
     )
     
     st.info("💡 提示：数据只在浏览器本地处理，不会上传给第三方 AI，绝对安全。")
     
-    # 允许用户调整表头行
     header_row = st.number_input("Excel表头所在行 (默认2，即第3行)", value=2, min_value=0)
 
 # ================= 3. 核心逻辑函数 =================
 
 def load_single_word(file_obj):
-    """读取单个 Word 文件流"""
+    """读取单个 Word 文件流 (含智能错误提示)"""
     try:
+        # 确保指针在文件开头
+        file_obj.seek(0)
         doc = Document(file_obj)
         full_text = []
         for para in doc.paragraphs:
             clean = para.text.strip()
             if len(clean) > 5:
                 full_text.append(clean)
-        return "\n".join(full_text)
+        return "\n".join(full_text), True  # 返回 (内容, 是否成功)
     except Exception as e:
-        return f"（文件 {file_obj.name} 读取失败: {e}）"
+        error_msg = str(e)
+        # 🔥 核心修改：拦截特定错误，返回人话提示
+        if "is not a zip file" in error_msg:
+            friendly_msg = (
+                f"❌ 【格式错误】文件：{file_obj.name}\n"
+                f"原因：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n"
+                f"👉 解决方法：\n"
+                f"1. 在电脑上用 Word 打开该文件。\n"
+                f"2. 点击左上角【文件】->【另存为】。\n"
+                f"3. 文件类型务必手动选择【Word 文档 (*.docx)】。\n"
+                f"4. 保存后，上传新的文件即可。"
+            )
+            return friendly_msg, False
+        else:
+            return f"❌ 文件 {file_obj.name} 读取失败: {error_msg}", False
 
 def find_context(subject, full_text):
     """RAG 检索"""
@@ -61,7 +76,6 @@ def find_context(subject, full_text):
     clean_sub = subject.replace(" ", "")
     idx = full_text.find(clean_sub)
     if idx == -1: return "（附注中未检索到该科目名称）"
-    # 截取前后文，因为文本变长了，稍微扩大一点范围
     start = max(0, idx - 600)
     end = min(len(full_text), idx + 1200) 
     return full_text[start:end].replace('\n', ' ')
@@ -81,8 +95,33 @@ def safe_pct(num, denom):
 # ================= 4. 主程序逻辑 =================
 
 if uploaded_excel:
-    st.success("✅ 分析完成！已生成数据综述与科目分析，请查看下方结果。")
     
+    # 先处理 Word，如果有错误直接在顶部报错
+    word_text_all = ""
+    has_word = False
+    word_error_list = []
+
+    if uploaded_word_files:
+        has_word = True
+        for w_file in uploaded_word_files:
+            content, success = load_single_word(w_file)
+            if success:
+                word_text_all += f"\n\n【--- 内容来自文件：{w_file.name} ---】\n"
+                word_text_all += content
+            else:
+                # 收集错误信息
+                word_error_list.append(content)
+    
+    # 🌟 UI 反馈区：如果有错误，直接弹红框
+    if word_error_list:
+        for err in word_error_list:
+            st.error(err)
+        st.warning("⚠️ 部分 Word 文件读取失败，生成的指令可能不包含完整原因分析。请按上述提示修复文件后重新上传。")
+    elif uploaded_word_files:
+        st.success("✅ 所有 Excel 和 Word 文件均读取成功！分析结果见下方。")
+    else:
+        st.success("✅ Excel 读取成功！(未上传 Word，仅进行纯数据分析)")
+
     try:
         # --- 1. 读取并处理 Excel ---
         df = pd.read_excel(uploaded_excel, sheet_name='1.合并资产表', header=header_row)
@@ -117,22 +156,6 @@ if uploaded_excel:
             df['占比_T'] = df['T'] / total_assets['T']
         else:
             df['占比_T'] = 0.0
-        
-        # --- 2. 处理 Word (支持多文件合并) ---
-        word_text_all = ""
-        has_word = False
-        
-        if uploaded_word_files:
-            has_word = True
-            # 循环读取每个文件
-            for w_file in uploaded_word_files:
-                content = load_single_word(w_file)
-                # 🔥 拼接时加上文件名标记，方便区分来源
-                word_text_all += f"\n\n【--- 以下内容来自文件：{w_file.name} ---】\n"
-                word_text_all += content
-        else:
-            # 如果没传文件，保持空字符串
-            pass
 
         # ================= 5. 结果展示 =================
         
@@ -174,13 +197,13 @@ if uploaded_excel:
             )
             st.code(text_overview, language='text')
 
-        # --- Tab 3: AI 指令 (纯净版) ---
+        # --- Tab 3: AI 指令 (智能版) ---
         with tab3:
             st.subheader("🤖 重点科目分析数据 (Copilot 模式)")
             st.caption("👉 点击代码块右上角的 **📄 复制**，粘贴给 DeepSeek 或 ChatGPT。")
             
             if not has_word:
-                st.info("ℹ️ 未上传 Word，生成【纯数据分析】。")
+                st.info("ℹ️ 未检测到有效的 Word 内容，生成【纯数据分析】。")
             
             major_subjects = detail_df[detail_df['占比_T'] > 0.01].index.tolist()
             
@@ -210,7 +233,6 @@ if uploaded_excel:
 截至{d_t}，发行人{subject}较{d_t1}{direction}{abs(diff):,.2f}万元，{pct_label}为{abs(pct):.2f}%。"""
 
                 if has_word:
-                    # 在合并后的所有文本中查找
                     context = find_context(subject, word_text_all)
                     prompt_final = prompt_base + f"""
 
@@ -226,7 +248,7 @@ if uploaded_excel:
                     st.code(prompt_final, language='text')
 
     except Exception as e:
-        st.error(f"解析出错: {e}")
+        st.error(f"Excel 解析出错: {e}")
         st.info("请检查 Excel 格式是否与模版一致。")
 
 else:
