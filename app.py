@@ -19,9 +19,10 @@ st.set_page_config(
 # ================= 2. 核心逻辑函数 (通用工具箱) =================
 
 def set_cell_border(cell, **kwargs):
-    """Word表格边框设置"""
+    """Word表格边框设置 (底层XML控制)"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
+    
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
         if border_name in kwargs:
             edge = kwargs[border_name]
@@ -29,15 +30,16 @@ def set_cell_border(cell, **kwargs):
             if tcBorders is None:
                 tcBorders = OxmlElement('w:tcBorders')
                 tcPr.append(tcBorders)
+            
             border = OxmlElement(f'w:{border_name}')
             border.set(qn('w:val'), edge.get('val', 'single'))
-            border.set(qn('w:sz'), str(edge.get('sz', 4))) # 4 = 0.5pt, 12 = 1.5pt
+            border.set(qn('w:sz'), str(edge.get('sz', 4))) # 4=0.5pt, 12=1.5pt
             border.set(qn('w:space'), str(edge.get('space', 0)))
             border.set(qn('w:color'), edge.get('color', 'auto'))
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 生成精排版 Word 表格 (严格按照你的参数)"""
+    """🔥 生成精排版 Word 表格 (严格网格 + 粗外框)"""
     doc = Document()
     
     # 全局字体
@@ -55,6 +57,8 @@ def create_word_table_file(df, title="数据表"):
         run.font.color.rgb = None
 
     export_df = df.reset_index()
+    
+    # 创建表格 (注意：不要设置 style='Table Grid'，否则会覆盖自定义边框)
     table = doc.add_table(rows=1, cols=len(export_df.columns))
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
@@ -66,7 +70,6 @@ def create_word_table_file(df, title="数据表"):
 
     # --- 1. 表头设置 ---
     hdr_cells = table.rows[0].cells
-    # 设置表头行高 (最小值 0.6cm)
     table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
     table.rows[0].height = Cm(0.6)
 
@@ -74,35 +77,39 @@ def create_word_table_file(df, title="数据表"):
         cell = hdr_cells[i]
         cell.text = str(col_name)
         
-        # 边框: 上下1.5磅(sz=12)，左右0.5磅(sz=4)
+        # 边框逻辑：表头上下粗(1.5pt)，左右如果是边界则粗，中间细
+        # sz=12 (1.5pt), sz=4 (0.5pt)
+        top_sz = 12
+        bottom_sz = 12 
+        left_sz = 12 if i == 0 else 4
+        right_sz = 12 if i == len(export_df.columns) - 1 else 4
+
         set_cell_border(cell, 
-                        top={"val": "single", "sz": 12}, 
-                        bottom={"val": "single", "sz": 12}, 
-                        left={"val": "single", "sz": 4}, 
-                        right={"val": "single", "sz": 4})
+                        top={"val": "single", "sz": top_sz}, 
+                        bottom={"val": "single", "sz": bottom_sz}, 
+                        left={"val": "single", "sz": left_sz}, 
+                        right={"val": "single", "sz": right_sz})
         
-        # 垂直居中 🔥
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # 单倍行距，防止贴顶
+        # 单倍行距
         paragraph.paragraph_format.line_spacing = 1.0 
-        paragraph.paragraph_format.space_before = Pt(2) # 微调
-        paragraph.paragraph_format.space_after = Pt(2)  # 微调
+        paragraph.paragraph_format.space_before = Pt(0) 
+        paragraph.paragraph_format.space_after = Pt(0)  
 
         for run in paragraph.runs:
             run.font.bold = True
             run.font.size = Pt(10.5)
-            run.font.name = 'Times New Roman'
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+            run.font.name = 'SimHei'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
 
     # --- 2. 数据填充 ---
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-        table.rows[r_idx+1].height = Cm(0.6) # 行高最小值 0.6cm
+        table.rows[r_idx+1].height = Cm(0.6)
 
         subject_name = str(row[0])
         is_bold_row = "合计" in subject_name or "总计" in subject_name
@@ -111,13 +118,21 @@ def create_word_table_file(df, title="数据表"):
             cell = row_cells[i]
             cell.text = str(val)
             
-            # 边框: 上细，下细(最后一行下粗)，左右细
+            # 边框逻辑：
+            # 上：细 (因为表头或上一行已经画了下边框，这里主要控制左、右、下)
+            # 下：最后一行粗(12)，其他细(4)
+            # 左：第一列粗(12)，其他细(4)
+            # 右：最后一列粗(12)，其他细(4)
+            
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
+            left_sz = 12 if i == 0 else 4
+            right_sz = 12 if i == len(export_df.columns) - 1 else 4
+            
             set_cell_border(cell, 
                             top={"val": "single", "sz": 4}, 
                             bottom={"val": "single", "sz": bottom_sz}, 
-                            left={"val": "single", "sz": 4}, 
-                            right={"val": "single", "sz": 4})
+                            left={"val": "single", "sz": left_sz}, 
+                            right={"val": "single", "sz": right_sz})
             
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             paragraph = cell.paragraphs[0]
@@ -127,7 +142,6 @@ def create_word_table_file(df, title="数据表"):
             else:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
-            # 单倍行距
             paragraph.paragraph_format.line_spacing = 1.0
             paragraph.paragraph_format.space_before = Pt(0)
             paragraph.paragraph_format.space_after = Pt(0)
@@ -153,7 +167,7 @@ def create_excel_file(df):
     return output
 
 def load_single_word(file_obj):
-    """读取 Word (含格式错误拦截)"""
+    """读取 Word (优化报错提示排版)"""
     try:
         file_obj.seek(0)
         doc = Document(file_obj)
@@ -162,10 +176,11 @@ def load_single_word(file_obj):
     except Exception as e:
         error_msg = str(e)
         if "is not a zip file" in error_msg:
+            # 🔥 这里的排版已经调整，解决了对齐问题
             friendly_msg = (
-                f"❌ 【格式错误】文件：{file_obj.name}\n"
-                f"原因：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n"
-                f"👉 解决方法：\n"
+                f"❌ **【格式错误】** 文件：{file_obj.name}\n\n"
+                f"**原因**：这是一个“伪装”的 .docx 文件（本质可能是老版本 .doc 或其他格式）。\n\n"
+                f"👉 **解决方法：**\n"
                 f"1. 在电脑上用 Word 打开该文件。\n"
                 f"2. 点击左上角【文件】->【另存为】。\n"
                 f"3. 文件类型务必手动选择【Word 文档 (*.docx)】。\n"
@@ -289,8 +304,9 @@ def process_analysis_tab(df_raw, word_text, total_col_name, analysis_name, d_lab
         
         st.code(text, language='text')
 
-    # 3. AI 指令 (🔥 增加了顶部提示词)
+    # 3. AI 指令
     with tab3:
+        # 🔥 新增提示
         st.info(f"💡 **提示**：以下是基于 **{d_t} (最新一期)** 占比前列的科目生成的分析指令。")
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         
