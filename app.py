@@ -16,8 +16,8 @@ st.markdown("""
 **💡 使用说明：**
 1. 上传 **Excel 底稿**（必须）。
 2. 上传 **Word 附注**（可选，用于生成原因分析）。
-3. 系统会自动计算数据，并生成 **AI 提问指令**。
-4. 点击指令右上角的 **📄 复制按钮**，发送给你常用的 AI (ChatGPT/DeepSeek) 即可。
+3. 系统会自动计算数据，生成 **数据分析语料**。
+4. 点击右上角的 **📄 复制按钮**，发送给 AI 或直接使用。
 """)
 
 # ================= 2. 侧边栏：文件上传 =================
@@ -77,8 +77,7 @@ def safe_pct(num, denom):
 # ================= 4. 主程序逻辑 =================
 
 if uploaded_excel:
-    # 🌟 修改点 1：文案优化 - 明确告知用户分析已完成
-    st.success("✅ 分析完成！已生成数据综述与 AI 指令，请查看下方结果。")
+    st.success("✅ 分析完成！已生成数据综述与科目分析，请查看下方结果。")
     
     try:
         # --- 1. 读取并处理 Excel ---
@@ -127,7 +126,7 @@ if uploaded_excel:
 
         # ================= 5. 结果展示 =================
         
-        tab1, tab2, tab3 = st.tabs(["📋 1. 资产明细", "📝 2. 综述文案", "🤖 3. AI 写作指令"])
+        tab1, tab2, tab3 = st.tabs(["📋 1. 资产明细", "📝 2. 综述文案", "🤖 3. 重点科目分析"])
         
         # --- Tab 1: 明细表 ---
         with tab1:
@@ -165,13 +164,13 @@ if uploaded_excel:
             )
             st.code(text_overview, language='text')
 
-        # --- Tab 3: AI 指令 (核心优化点) ---
+        # --- Tab 3: AI 指令 (纯净版) ---
         with tab3:
-            st.subheader("🤖 重点科目分析指令 (Copilot 模式)")
+            st.subheader("🤖 重点科目分析数据 (Copilot 模式)")
             st.caption("👉 点击代码块右上角的 **📄 复制**，粘贴给 DeepSeek 或 ChatGPT。")
             
             if not has_word:
-                st.info("ℹ️ 未上传 Word，生成【纯数据分析指令】。")
+                st.info("ℹ️ 未上传 Word，生成【纯数据分析】。")
             
             major_subjects = detail_df[detail_df['占比_T'] > 0.01].index.tolist()
             
@@ -185,7 +184,7 @@ if uploaded_excel:
                 diff = v_t - v_t1
                 pct = safe_pct(diff, v_t1)
                 
-                # 🌟 修改点 2：智能判断增幅还是降幅
+                # 智能词汇逻辑
                 if diff >= 0:
                     direction = "增加"
                     pct_label = "增幅"
@@ -193,7 +192,7 @@ if uploaded_excel:
                     direction = "减少"
                     pct_label = "降幅"
                 
-                # 基础数据 (Prompt) - 这里用了 pct_label 变量
+                # 基础数据 (Prompt)
                 prompt_base = f"""【任务】：请分析“{subject}”的变动情况。
 
 【1. 财务具体科目数据 (Trend)】
@@ -211,11 +210,10 @@ if uploaded_excel:
 {context}
 
 【4. 写作指令】
-1. 请将上述数据整理成一段通顺的财务分析文字。
-2. 紧接着，请根据第3部分分析变动原因（即“主要系...所致”）。
-3. 如果Part 3没提到具体原因，请直接写“主要系业务规模变动所致”，严禁瞎编。"""
+请结合上述数据和附注，分析变动原因（即“主要系...所致”）。如果附注中未提及，请写“主要系业务规模变动所致”。"""
                 else:
-                    prompt_final = prompt_base + "\n\n【指令】请将上述数据整理成一段通顺的财务分析文字。"
+                    # 无 Word 时，只给纯数据，不给指令
+                    prompt_final = prompt_base 
 
                 with st.expander(f"📌 {subject} (占比 {r_t:.2f}%)"):
                     st.code(prompt_final, language='text')
