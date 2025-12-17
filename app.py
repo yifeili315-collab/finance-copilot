@@ -19,7 +19,7 @@ st.set_page_config(
 # ================= 2. 核心逻辑函数 =================
 
 def set_cell_border(cell, **kwargs):
-    """设置单元格边框"""
+    """设置单元格边框 (XML操作)"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
@@ -37,8 +37,9 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """🔥 生成精排版 Word 表格"""
+    """🔥 生成精排版 Word 表格 (五号字体，全居中)"""
     doc = Document()
+    # 全局样式：五号字体 (10.5pt)
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
@@ -57,38 +58,43 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
     
-    col_widths = [Cm(5.0)] + [Cm(3.0)] * (len(export_df.columns) - 1)
+    # 列宽设置
+    col_widths = [Cm(6.0)] + [Cm(3.5)] * (len(export_df.columns) - 1)
     for i, width in enumerate(col_widths):
         for row in table.rows:
             row.cells[i].width = width
 
+    # --- 表头设置 ---
     hdr_cells = table.rows[0].cells
     table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    table.rows[0].height = Cm(0.8)
+    table.rows[0].height = Cm(1.0) # 表头略高
 
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
-        top_sz = 12
-        bottom_sz = 12 
-        left_sz = 12 if i == 0 else 4
-        right_sz = 12 if i == len(export_df.columns) - 1 else 4
-        set_cell_border(cell, top={"val": "single", "sz": top_sz}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": left_sz}, right={"val": "single", "sz": right_sz})
+        # 边框
+        set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
+        # 垂直居中
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        # 水平居中
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
         for run in paragraph.runs:
             run.font.bold = True
-            run.font.size = Pt(10.5)
+            run.font.size = Pt(10.5) # 五号
             run.font.name = 'Times New Roman'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
+    # --- 数据行设置 ---
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
         table.rows[r_idx+1].height = Cm(0.8)
 
         subject_name = str(row[0]).strip()
+        
+        # 加粗逻辑
         is_bold = False
         if bold_rows and subject_name in bold_rows: is_bold = True
         elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额"]): is_bold = True
@@ -97,19 +103,23 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val) if pd.notna(val) and val != "" else ""
+            
+            # 边框
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
-            left_sz = 12 if i == 0 else 4
-            right_sz = 12 if i == len(export_df.columns) - 1 else 4
-            set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": left_sz}, right={"val": "single", "sz": right_sz})
-            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
+            
+            # 🔥 核心需求：垂直居中 + 水平居中
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER 
             paragraph = cell.paragraphs[0]
-            if i == 0: paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            else: paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER 
+            
             for run in paragraph.runs:
-                run.font.size = Pt(10.5) if is_bold else Pt(9)
+                run.font.size = Pt(10.5) # 五号字体
                 run.font.name = 'Times New Roman'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-                if is_bold: run.font.bold = True
+                if is_bold:
+                    run.font.bold = True
+                    
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
@@ -158,19 +168,17 @@ def extract_date_label(header_str):
     return s
 
 def safe_pct(num, denom):
-    return (num / denom * 100) if denom != 0 else 0.0
+    return (num / denom * 100) if denom != 0 and pd.notna(num) and pd.notna(denom) else 0.0
 
-# 🔥 核心修正：模糊查找 Sheet 名称
+# 🔥 核心：模糊查找 Excel Sheet
 def fuzzy_load_excel(file_obj, sheet_name, header_row):
     try:
         xl = pd.ExcelFile(file_obj)
         all_sheet_names = xl.sheet_names
         
-        # 1. 精确匹配
         if sheet_name in all_sheet_names:
             return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
         
-        # 2. 忽略空格匹配
         clean_target = sheet_name.replace(" ", "")
         for actual_name in all_sheet_names:
             if actual_name.replace(" ", "") == clean_target:
@@ -181,6 +189,7 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row):
     except Exception as e:
         return None, [str(e)]
 
+# 🔥 核心：模糊查找行 (返回行对象)
 def find_row_fuzzy(df, keywords, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
@@ -194,6 +203,17 @@ def find_row_fuzzy(df, keywords, default_val=None):
         if mask.any(): return df.loc[df.index[mask][0]]
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
+
+# 🔥 核心：模糊查找行索引 (返回数字 Index)
+def find_index_fuzzy(df, keywords):
+    if isinstance(keywords, str): keywords = [keywords]
+    clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
+    for kw in keywords:
+        clean_kw = kw.replace(" ", "")
+        mask = clean_index.str.contains(clean_kw, case=False, na=False)
+        if mask.any():
+            return df.index.get_loc(df.index[mask][0])
+    return None
 
 # ================= 3. 业务逻辑：资产/负债 =================
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
@@ -312,8 +332,63 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                 st.code(prompt, language='text')
 
 # ================= 4. 业务逻辑：现金流量 =================
+def calculate_cash_flow_percentages(df_raw, d_labels):
+    """
+    计算现金流各项占比
+    逻辑：
+    1. 经营流入占比：(经营流入项 / 经营流入小计)
+    2. 经营流出占比：(经营流出项 / 经营流出小计)
+    3. ...以此类推
+    """
+    pct_data = []
+    d_t, d_t1, d_t2 = d_labels
+
+    # 定义区间 (开始关键词, 结束关键词(即分母), 类别名称)
+    # 注意：结束关键词既是区间终点，也是分母
+    sections = [
+        (["经营活动产生的现金流量", "一、经营活动"], ["经营活动现金流入小计"], "经营活动现金流入"),
+        (["经营活动现金流入小计"], ["经营活动现金流出小计"], "经营活动现金流出"),
+        (["投资活动产生的现金流量", "二、投资活动"], ["投资活动现金流入小计"], "投资活动现金流入"),
+        (["投资活动现金流入小计"], ["投资活动现金流出小计"], "投资活动现金流出"),
+        (["筹资活动产生的现金流量", "三、筹资活动"], ["筹资活动现金流入小计"], "筹资活动现金流入"),
+        (["筹资活动现金流入小计"], ["筹资活动现金流出小计"], "筹资活动现金流出"),
+    ]
+
+    for start_kws, end_kws, cat_name in sections:
+        # 找索引
+        idx_start = find_index_fuzzy(df_raw, start_kws)
+        idx_end = find_index_fuzzy(df_raw, end_kws)
+        
+        if idx_start is not None and idx_end is not None and idx_end > idx_start:
+            # 获取分母行数据
+            denom_row = df_raw.iloc[idx_end]
+            
+            # 遍历中间的行
+            # 区间是 (idx_start + 1) 到 (idx_end - 1)
+            subset = df_raw.iloc[idx_start+1 : idx_end]
+            
+            for i in range(len(subset)):
+                row = subset.iloc[i]
+                subject = row.name
+                
+                # 跳过空行或无意义行
+                if not isinstance(subject, str) or len(subject.strip()) < 2: continue
+                
+                # 计算 T, T-1, T-2 的占比
+                pct_t = safe_pct(row['T'], denom_row['T'])
+                pct_t1 = safe_pct(row['T_1'], denom_row['T_1'])
+                pct_t2 = safe_pct(row['T_2'], denom_row['T_2'])
+                
+                pct_data.append([
+                    f"{cat_name} - {subject}", 
+                    f"{pct_t:.2f}%", 
+                    f"{pct_t1:.2f}%", 
+                    f"{pct_t2:.2f}%"
+                ])
+    
+    return pd.DataFrame(pct_data, columns=["项目(占比)", f"{d_t}占比", f"{d_t1}占比", f"{d_t2}占比"]).set_index("项目(占比)")
+
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
-    # 🔥 核心修复：解包日期标签
     d_t, d_t1, d_t2 = d_labels
     
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
@@ -328,7 +403,11 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     df_display = pd.DataFrame(data_list, columns=["项目", d_t, d_t1, d_t2])
     df_display.set_index("项目", inplace=True)
 
-    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
+    # 计算占比表
+    df_pct = calculate_cash_flow_percentages(df_raw, d_labels)
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 摘要数据", "📊 占比分析", "📝 综述文案", "🤖 AI 分析指令"])
+    
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown("### 现金流量结构明细")
@@ -341,7 +420,16 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         st.dataframe(df_display, use_container_width=True)
 
     with tab2:
-        st.markdown("👇 **直接复制：**")
+        st.markdown("### 各项活动现金流占比分析")
+        st.info("💡 说明：流入项占比 = 科目/流入小计；流出项占比 = 科目/流出小计")
+        st.dataframe(df_pct, use_container_width=True)
+        c2_1, c2_2 = st.columns([1, 1])
+        with c2_1:
+            doc_pct = create_word_table_file(df_pct, title="现金流量占比表")
+            st.download_button("📥 下载占比表 Word", doc_pct, "现金流占比.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    with tab3:
+        st.markdown("👇 **直接复制（分块展示）：**")
         op_in_total = find_row_fuzzy(df_raw, ["经营活动现金流入小计"])
         op_out_total = find_row_fuzzy(df_raw, ["经营活动现金流出小计"])
         op_net = find_row_fuzzy(df_raw, ["经营活动产生的现金流量净额"])
@@ -361,45 +449,50 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         fin_repay = find_row_fuzzy(df_raw, ["偿还债务支付的现金"])
         fin_interest = find_row_fuzzy(df_raw, ["分配股利、利润或偿付利息支付的现金"])
 
-        text = "**1、经营活动产生的现金流量分析**\n\n"
-        text += (f"报告期内，发行人经营活动现金流入分别为{op_in_total['T_2']:,.2f}万元、{op_in_total['T_1']:,.2f}万元和{op_in_total['T']:,.2f}万元。"
-                 f"其中，销售商品、提供劳务收到的现金分别为{op_sales['T_2']:,.2f}万元、{op_sales['T_1']:,.2f}万元及{op_sales['T']:,.2f}万元，"
-                 f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；"
-                 f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
-                 f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
-                 f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
-        text += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。"
-                 f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
-                 f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
-                 f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。"
-                 f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
-                 f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
-                 f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
-        text += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
-                 f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。\n\n")
+        # Box 1
+        with st.expander("📝 1、经营活动产生的现金流量分析", expanded=True):
+            text_op = (f"报告期内，发行人经营活动现金流入分别为{op_in_total['T_2']:,.2f}万元、{op_in_total['T_1']:,.2f}万元和{op_in_total['T']:,.2f}万元。"
+                     f"其中，销售商品、提供劳务收到的现金分别为{op_sales['T_2']:,.2f}万元、{op_sales['T_1']:,.2f}万元及{op_sales['T']:,.2f}万元，"
+                     f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；"
+                     f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
+                     f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
+                     f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
+            text_op += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。"
+                     f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
+                     f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
+                     f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。"
+                     f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
+                     f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
+                     f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
+            text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
+                     f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
+            st.code(text_op, language='text')
 
-        text += "**2、投资活动产生的现金流量分析**\n\n"
-        text += (f"报告期内，发行人投资活动产生的现金流量净额分别为{inv_net['T_2']:,.2f}万元、{inv_net['T_1']:,.2f}万元和{inv_net['T']:,.2f}万元。"
-                 f"投资活动现金流入分别为{inv_in_total['T_2']:,.2f}万元、{inv_in_total['T_1']:,.2f}万元及{inv_in_total['T']:,.2f}万元；"
-                 f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
-                 f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
-                 f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。"
-                 f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。\n\n")
+        # Box 2
+        with st.expander("📝 2、投资活动产生的现金流量分析", expanded=True):
+            text_inv = (f"报告期内，发行人投资活动产生的现金流量净额分别为{inv_net['T_2']:,.2f}万元、{inv_net['T_1']:,.2f}万元和{inv_net['T']:,.2f}万元。"
+                     f"投资活动现金流入分别为{inv_in_total['T_2']:,.2f}万元、{inv_in_total['T_1']:,.2f}万元及{inv_in_total['T']:,.2f}万元；"
+                     f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
+                     f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
+                     f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。"
+                     f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。")
+            st.code(text_inv, language='text')
 
-        text += "**3、筹资活动产生的现金流量分析**\n\n"
-        text += (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。"
-                 f"报告期内筹资活动产生的现金流量净额较大，主要系吸收投资收到的现金及取得借款收到的现金流入所致。\n\n")
-        text += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由取得借款所收到的现金及吸收投资收到的现金构成。"
-                 f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
-                 f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
-                 f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
-        text += (f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
-                 f"发行人筹资活动现金流出主要由偿还债务所支付的现金及分配股利、利润或偿付利息支付的现金构成。"
-                 f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
-                 f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
-        st.code(text, language='text')
+        # Box 3
+        with st.expander("📝 3、筹资活动产生的现金流量分析", expanded=True):
+            text_fin = (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。"
+                     f"报告期内筹资活动产生的现金流量净额较大，主要系吸收投资收到的现金及取得借款收到的现金流入所致。\n\n")
+            text_fin += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由取得借款所收到的现金及吸收投资收到的现金构成。"
+                     f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
+                     f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
+                     f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
+            text_fin += (f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
+                     f"发行人筹资活动现金流出主要由偿还债务所支付的现金及分配股利、利润或偿付利息支付的现金构成。"
+                     f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
+                     f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
+            st.code(text_fin, language='text')
 
-    with tab3:
+    with tab4:
         st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
         if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
         else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令。")
@@ -438,7 +531,6 @@ if not uploaded_excel:
     st.markdown("""
     ### 🛑 使用前必读 (Requirements)
     为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
