@@ -169,6 +169,7 @@ def safe_pct(num, denom):
 
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
+        # 🔥 智能切片：对于负债表，只读取到“负债合计”行，忽略下面的所有者权益
         if analysis_name == "负债":
              total_idx = df_raw.index[df_raw.index.str.contains(total_col_name)].tolist()
              if total_idx:
@@ -183,7 +184,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         
         total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
     except Exception as e:
-        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。错误信息: {e}")
+        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行。\n\n💡 **排查建议**：\n1. 请检查 Excel 底部 Sheet 名称是否正确（默认：2.合并负债表）。\n2. 请确认表中是否有“{total_col_name}”这一行。")
         return
 
     df = df_raw.copy()
@@ -318,7 +319,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
                 st.code(prompt, language='text')
 
-# ================= 3. Sidebar =================
+# ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"])
@@ -330,9 +331,10 @@ with st.sidebar:
     with st.expander("⚙️ 高级设置 (Sheet名称/表头行)"):
         header_row = st.number_input("表头所在行 (默认2，即第3行)", value=2, min_value=0)
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
-        sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
+        # 🔥 修复：默认改为“2.合并负债表”，这是最标准的名称
+        sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债表")
 
-# ================= 4. Main Program =================
+# ================= 4. 主程序 =================
 
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
@@ -344,7 +346,7 @@ if not uploaded_excel:
     
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
-        * 负债表 -> `2.合并负债及权益表`
+        * 负债表 -> `2.合并负债表` (注意：不是“及权益表”)
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
     3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
     
@@ -409,7 +411,7 @@ else:
                 total_name = "负债总计"
             process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
         else:
-            st.error(f"❌ 读取 Excel 失败：{err}\n\n请检查您的 Excel 中是否存在 Sheet 名为：**{sheet_liab}**")
+            st.error(f"❌ 读取 Excel 失败：{err}\n\n请检查您的 Excel 中是否存在 Sheet 名为：**{sheet_liab}**\n*(提示：通常底部的 Tab 名称是“2.合并负债表”，不是“合并负债及权益表”)*")
 
     else:
         st.info("🚧 该模块正在施工中，敬请期待后续更新...")
