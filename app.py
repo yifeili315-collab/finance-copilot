@@ -353,7 +353,6 @@ def calculate_cash_flow_percentages(df_raw, d_labels):
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
-    
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
     for display_name, keywords in structure:
@@ -419,16 +418,16 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；\n\n"
                      f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
                      f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
-                     f"发行人收到其他与经营活动有关的现金主要包括（）。\n\n")
+                     f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
             text_op += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。\n\n"
-                     f"报告期内，发行人经营活动现金流出主要来源于（）。"
+                     f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
                      f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。\n\n"
                      f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
-                     f"支付其他与经营活动有关的现金包括：（）等。\n\n")
+                     f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
-                     f"主要系（）所致。")
+                     f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
             st.text_area("文案内容", value=text_op, height=350, label_visibility="collapsed", key="txt_op")
 
         # Box 2
@@ -439,7 +438,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
                      f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
                      f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
-                     f"发行人投资活动现金流量净额【分析】，主要是发行人（）所致。")
+                     f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。")
             st.text_area("文案内容", value=text_inv, height=250, label_visibility="collapsed", key="txt_inv")
 
         # Box 3
@@ -474,10 +473,112 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             with st.expander(f"📌 {subject}"):
                 st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
 
+# ================= 5. 业务逻辑：财务指标分析 =================
+def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
+    d_t, d_t1, d_t2 = d_labels
+    
+    # 1. 定义要抓取的指标
+    targets = [
+        "资产负债率（%）",
+        "流动比率（倍）",
+        "速动比率（倍）",
+        "EBITDA（万元）",
+        "EBITDA利息保障倍数（倍）"
+    ]
+    
+    # 2. 提取数据
+    data_list = []
+    data_map = {} # 用于文案生成
+    
+    for t in targets:
+        # 模糊查找（兼容中文括号和英文括号）
+        keywords = [t, t.replace("（", "(").replace("）", ")")]
+        row = find_row_fuzzy(df_raw, keywords)
+        
+        val_t, val_t1, val_t2 = 0, 0, 0
+        if row.name is not None:
+            val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
+            data_map[t] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
+        
+        # 格式化逻辑
+        if "EBITDA（万元）" in t:
+            # 金额格式：1,234.56
+            fmt_t = f"{val_t:,.2f}"
+            fmt_t1 = f"{val_t1:,.2f}"
+            fmt_t2 = f"{val_t2:,.2f}"
+        else:
+            # 比率格式：1.23 (直接保留两位小数)
+            fmt_t = f"{val_t:.2f}"
+            fmt_t1 = f"{val_t1:.2f}"
+            fmt_t2 = f"{val_t2:.2f}"
+            
+        data_list.append([t, fmt_t, fmt_t1, fmt_t2])
+
+    df_display = pd.DataFrame(data_list, columns=["项目", d_t, d_t1, d_t2])
+    df_display.set_index("项目", inplace=True)
+
+    tab1, tab2, tab3 = st.tabs(["📋 指标数据", "📝 综述文案", "🤖 AI 分析指令"])
+
+    with tab1:
+        c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
+        with c1: st.markdown("### 主要偿债指标")
+        with c2:
+            doc_file = create_word_table_file(df_display, title="主要财务指标表")
+            st.download_button("📥 下载 Word", doc_file, "财务指标表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        with c3:
+            excel_file = create_excel_file(df_display)
+            st.download_button("📥 下载 Excel", excel_file, "财务指标表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.dataframe(df_display, use_container_width=True)
+
+    with tab2:
+        # 准备数据用于文案
+        # 注意：这里需要处理 key 不存在的情况（虽然上面逻辑应该能保证）
+        alr = data_map.get("资产负债率（%）", {'T':0,'T_1':0,'T_2':0})
+        cr = data_map.get("流动比率（倍）", {'T':0,'T_1':0,'T_2':0})
+        qr = data_map.get("速动比率（倍）", {'T':0,'T_1':0,'T_2':0})
+        ebitda = data_map.get("EBITDA（万元）", {'T':0,'T_1':0,'T_2':0})
+        int_cov = data_map.get("EBITDA利息保障倍数（倍）", {'T':0,'T_1':0,'T_2':0})
+
+        with st.container(border=True):
+            st.markdown("#### 📝 偿债能力分析综述")
+            
+            # 1. 资产负债率
+            text = f"1、资产负债率\n\n"
+            text += f"报告期内，发行人的资产负债率分别为{alr['T_2']:.2f}%、{alr['T_1']:.2f}%和{alr['T']:.2f}%。\n\n"
+            
+            # 2. 流动比率及速动比率
+            text += f"2、流动比率及速动比率\n\n"
+            text += (f"报告期内，发行人的流动比率分别为{cr['T_2']:.2f}倍、{cr['T_1']:.2f}倍和{cr['T']:.2f}倍；"
+                     f"同期速动比率分别为{qr['T_2']:.2f}倍、{qr['T_1']:.2f}倍和{qr['T']:.2f}倍。\n\n")
+            
+            # 3. EBITDA
+            text += f"3、EBITDA利息保障倍数\n\n"
+            text += (f"报告期内，发行人EBITDA分别为{ebitda['T_2']:,.2f}万元、{ebitda['T_1']:,.2f}万元和{ebitda['T']:,.2f}万元，"
+                     f"发行人EBITDA利息保障倍数分别为{int_cov['T_2']:.2f}倍、{int_cov['T_1']:.2f}倍和{int_cov['T']:.2f}倍。")
+            
+            st.text_area("文案内容", value=text, height=400, label_visibility="collapsed", help="Ctrl+A 全选")
+
+    with tab3:
+        st.info("💡 **提示**：财务指标的变动通常需要结合资产负债结构和盈利能力进行综合分析。")
+        
+        # 针对每个指标生成简单指令
+        prompts = [
+            ("资产负债率", alr, "分析偿债风险变化"),
+            ("流动比率", cr, "分析短期偿债能力"),
+            ("EBITDA", ebitda, "分析盈利及获现能力")
+        ]
+        
+        for name, data, task in prompts:
+            prompt = f"""【任务】{task}：{name}\n\n【数据表现】\n{d_t2}、{d_t1}及{d_t}，{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n\n【分析要求】\n结合企业经营情况，分析指标变动的原因。"""
+            
+            with st.expander(f"📌 {name}"):
+                st.text_area("AI 指令", value=prompt, height=200, label_visibility="collapsed")
+
+
 # ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 操控台")
-    analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析 (开发中...)"])
+    analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析"])
     st.markdown("---")
     
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
@@ -488,6 +589,7 @@ with st.sidebar:
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
         sheet_cash = st.text_input("现金流量表 Sheet 名", value="4.合并现金流量表")
+        sheet_ratios = st.text_input("财务指标表 Sheet 名", value="5-3主要财务指标计算-方案3（专用公司债）")
 
 # ================= 4. 主程序 =================
 
@@ -561,6 +663,12 @@ else:
         df_cash, d_labels, err = get_clean_data(sheet_cash)
         if df_cash is not None:
             process_cash_flow_tab(df_cash, word_data_list, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
+
+    elif analysis_page == "(四) 财务指标分析":
+        df_ratios, d_labels, err = get_clean_data(sheet_ratios)
+        if df_ratios is not None:
+            process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
         else: st.error(f"❌ 读取失败：{err}")
 
     else:
