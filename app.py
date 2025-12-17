@@ -375,7 +375,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
             
-            # 🟢 [修改]：直接使用 markdown 展示文案 + 下方直接展示代码框（无折叠）
             with st.container(border=True):
                 st.markdown(f"#### 📝 {analysis_name}综述文案")
                 st.markdown(text)
@@ -414,7 +413,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             if ctx:
                 analysis_text += f"\n\n【参考附注信息】\n{ctx}"
 
-            # 🟢 [修改]：Expander内直接展示 markdown + 代码框
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.markdown(analysis_text)
                 st.code(analysis_text, language='text')
@@ -698,10 +696,11 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         
         period_exp_data.append(row_dat)
     
+    # 🟢 [修复]：使用带年份的列名，避免 Duplicate column names 错误
     pe_cols = ["项目", 
-               f"{d_t}金额", "占营业收入比例", 
-               f"{d_t1}金额", "占营业收入比例",
-               f"{d_t2}金额", "占营业收入比例"]
+               f"{d_t}金额", f"{d_t}占比", 
+               f"{d_t1}金额", f"{d_t1}占比",
+               f"{d_t2}金额", f"{d_t2}占比"]
     
     df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
