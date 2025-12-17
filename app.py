@@ -37,7 +37,7 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """🔥 生成精排版 Word 表格 (五号字体，全居中)"""
+    """🔥 生成精排版 Word 表格"""
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -169,7 +169,6 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
         all_sheet_names = xl.sheet_names
         target_sheet = None
         
-        # 1. 找 Sheet
         if sheet_name in all_sheet_names:
             target_sheet = sheet_name
         else:
@@ -183,11 +182,10 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
         if target_sheet is None:
             return None, all_sheet_names
 
-        # 2. 如果是财务指标表，使用智能读取逻辑
+        # 如果是财务指标表，使用智能读取逻辑
         if "财务指标" in sheet_name or "5-3" in sheet_name:
             return smart_load_ratios(file_obj, target_sheet)
         
-        # 3. 普通表读取
         return pd.read_excel(file_obj, sheet_name=target_sheet, header=header_row), None
 
     except Exception as e:
@@ -236,33 +234,35 @@ def smart_load_ratios(file_obj, sheet_name):
     except Exception as e:
         raise Exception(f"智能读取失败: {str(e)}")
 
-# 🔥 核心修正：增加 exclude_keywords 参数，防止混淆
+# 智能查找行 (解决重名问题)
 def find_row_fuzzy(df, keywords, exclude_keywords=None, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
-    
-    # 1. 优先：完全匹配
+    found_rows = []
+
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
-        mask = clean_index == clean_kw 
-        if mask.any(): return df.loc[df.index[mask][0]]
+        mask_exact = clean_index == clean_kw
+        mask_contains = clean_index.str.contains(clean_kw, case=False, na=False)
         
-    # 2. 其次：包含匹配 (带排除逻辑)
-    for kw in keywords:
-        clean_kw = kw.replace(" ", "")
-        mask = clean_index.str.contains(clean_kw, case=False, na=False)
-        
-        # 🔥 如果有排除词，进行过滤
         if exclude_keywords:
             for ex_kw in exclude_keywords:
                 clean_ex = ex_kw.replace(" ", "")
-                # 排除那些包含排除词的行
-                mask = mask & (~clean_index.str.contains(clean_ex, case=False, na=False))
+                mask_contains = mask_contains & (~clean_index.str.contains(clean_ex, case=False, na=False))
         
-        if mask.any(): 
-            # 默认返回第一个匹配项（解决重复问题）
-            return df.loc[df.index[mask][0]]
-        
+        matched_indices = df.index[mask_exact | mask_contains].tolist()
+        for idx in matched_indices:
+            row = df.loc[idx]
+            if isinstance(row, pd.DataFrame):
+                for _, r in row.iterrows(): found_rows.append(r)
+            else:
+                found_rows.append(row)
+    
+    # 智能择优：找第一个有数据的行
+    for row in found_rows:
+        if row['T'] != 0 or row['T_1'] != 0: return row
+            
+    if found_rows: return found_rows[0]
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
@@ -274,6 +274,40 @@ def find_index_fuzzy(df, keywords):
         mask = clean_index.str.contains(clean_kw, case=False, na=False)
         if mask.any(): return df.index.get_loc(df.index[mask][0])
     return None
+
+# 🔥 核心修正：智能单位自适应 (v11.7 门槛大幅降低版)
+def smart_scale_convert(val, subject_name="", is_ebitda=False, is_ratio=False):
+    """
+    根据科目名称和数值量级自动修正单位
+    """
+    if pd.isna(val) or val == 0: return 0.0
+    
+    # 1. 优先：看科目名称里的显式单位
+    if "亿元" in subject_name:
+        return val * 10000.0
+    if "万元" in subject_name:
+        return val
+    # 如果是 (元) 且不是万元，则认为是元
+    if "元" in subject_name and "万元" not in subject_name and "亿元" not in subject_name:
+        return val / 10000.0
+
+    # 2. 其次：针对 EBITDA 的数值推断 (仅当无单位时)
+    if is_ebitda:
+        # 🔥 修改点：门槛降至 100万 (1,000,000)
+        # 只要数值大于100万，我们就有99%的把握它是“元”。
+        # 因为如果它是“万元”，那就是100亿，这在普通项目里是不可能的。
+        if abs(val) > 1000000:
+            return val / 10000.0
+        # 否则默认是“万元” (比如 500，代表 500万)
+        else:
+            return val
+            
+    # 3. 针对比率
+    if is_ratio:
+        if abs(val) < 1.0: return val * 100.0
+        return val
+        
+    return val
 
 # ================= 3. 业务逻辑：资产/负债 =================
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
@@ -546,27 +580,15 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                 st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
 
 # ================= 5. 业务逻辑：财务指标分析 =================
-def smart_scale_convert(val, is_ebitda=False, is_ratio=False):
-    """根据数值量级自动修正单位"""
-    if pd.isna(val) or val == 0: return 0.0
-    if is_ebitda:
-        if abs(val) > 500000: return val / 10000.0 # 元转万元
-        elif abs(val) < 1000: return val * 10000.0 # 亿元转万元
-        else: return val # 默认万元
-    if is_ratio:
-        if abs(val) < 1.0: return val * 100.0 # 小数转百分比
-        return val
-    return val
-
 def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
     # 🔥 核心修正：(显示名称, [搜索关键词], [排除关键词])
     metrics_config = [
-        ("资产负债率（%）", ["资产负债率"], None),
+        ("资产负债率（%）", ["资产负债率"], ["平均"]), # 排除“平均资产负债率”
         ("流动比率（倍）", ["流动比率"], None),
         ("速动比率（倍）", ["速动比率"], None),
-        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"], ["倍", "比", "率", "/", "%"]), # 排除比率类
+        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"], ["倍", "比", "率", "/", "%", "全部债务", "利息"]), # 排除比率类
         ("EBITDA利息保障倍数（倍）", ["EBITDA利息保障倍数", "利息保障倍数", "EBITDA利息倍数"], None)
     ]
     
@@ -574,17 +596,19 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     data_map = {} 
     
     for display_name, search_kws, ex_kws in metrics_config:
-        # 传入排除列表
+        # 使用不带单位的关键词去模糊搜索
         row = find_row_fuzzy(df_raw, search_kws, exclude_keywords=ex_kws)
         
         val_t, val_t1, val_t2 = 0, 0, 0
         if row.name is not None:
+            # 🔥 核心修正：应用智能单位转换
             is_ebitda = "EBITDA（万元）" in display_name
             is_ratio = "资产负债率" in display_name
             
-            val_t = smart_scale_convert(row['T'], is_ebitda, is_ratio)
-            val_t1 = smart_scale_convert(row['T_1'], is_ebitda, is_ratio)
-            val_t2 = smart_scale_convert(row['T_2'], is_ebitda, is_ratio)
+            # 传入 subject_name 帮助判断单位
+            val_t = smart_scale_convert(row['T'], row.name, is_ebitda, is_ratio)
+            val_t1 = smart_scale_convert(row['T_1'], row.name, is_ebitda, is_ratio)
+            val_t2 = smart_scale_convert(row['T_2'], row.name, is_ebitda, is_ratio)
             
             data_map[display_name] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
         
