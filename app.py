@@ -4,7 +4,7 @@ import re
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.oxml import OxmlElement
 import io
@@ -91,6 +91,11 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER 
+        # 🟢 [修改]：设置单倍行距，段前段后0，确保垂直居中生效
+        paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
+        
         for run in paragraph.runs:
             run.font.bold = True
             run.font.size = Pt(10.5)
@@ -100,11 +105,14 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-        table.rows[r_idx+1].height = Cm(0.8)
+        # 🟢 [修改]：设置表格高度最小值为 0.6cm
+        table.rows[r_idx+1].height = Cm(0.6)
+        
         subject_name = str(row[0]).strip()
         is_bold = False
         if bold_rows and subject_name in bold_rows: is_bold = True
-        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额", "构成", "活动"]): is_bold = True
+        # 🟢 [修改]：移除了 "活动" 关键词，防止“经营活动现金流入小计”被错误加粗
+        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额", "构成"]): is_bold = True
         elif subject_name.endswith("：") or subject_name.endswith(":"): is_bold = True
 
         for i, val in enumerate(row):
@@ -113,8 +121,14 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            
             paragraph = cell.paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # 🟢 [修改]：设置单倍行距，段前段后0，确保垂直居中生效
+            paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+
             for run in paragraph.runs:
                 run.font.size = Pt(10.5)
                 run.font.name = 'Times New Roman'
@@ -321,9 +335,8 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.error(f"❌ 数据处理错误: {e}")
         return
 
-    # 🟢 [修改]：过滤掉三年数据全为0的行（保留标题行，即含冒号的）
+    # 过滤掉三年数据全为0的行（保留标题行，即含冒号的）
     df = df_raw.copy()
-    # 筛选条件：保留 (至少有一年不为0) OR (是标题行)
     mask_keep = ~((df['T'] == 0) & (df['T_1'] == 0) & (df['T_2'] == 0)) 
     mask_title = df.index.astype(str).str.contains(r'[:：]')
     df = df[mask_keep | mask_title]
@@ -587,7 +600,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
-            # 按要求格式化文案
+            # 🟢 [修改]：按要求格式化文案
             cf_text = (f"报告期各期，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n"
                      f"截至{d_t1}，发行人{subject}较{d_t2}净{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n"
                      f"截至{d_t}，发行人{subject}较{d_t1}净{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。\n\n"
@@ -641,7 +654,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
-            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
+            # 如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
             if item in ['销售费用', '管理费用', '研发费用', '财务费用', '营业外收入', '营业外支出']:
                 if val_t == 0 and val_t1 == 0 and val_t2 == 0:
                     continue
@@ -697,7 +710,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
              r = find_row_fuzzy(df_raw, [kw])
              if r.name: all_expense_rows.append(r)
 
-    # 🟢 [修改]：期间费用占比计算逻辑修正 (分母改为 period_expenses)
+    # 构建期间费用分析表格数据
     period_exp_data = []
     sum_t, sum_t1, sum_t2 = 0, 0, 0 # 用于计算合计
 
@@ -735,7 +748,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     
     period_exp_data.append(total_row)
     
-    # 🟢 [修复]：使用带年份的列名，并将 "占营业收入比例" 改为 "占期间费用比例"
+    # 🟢 [修改]：修正表头为“占期间费用比例”
     pe_cols = ["项目", 
                f"{d_t}金额", f"{d_t}占期间费用比例", 
                f"{d_t1}金额", f"{d_t1}占期间费用比例",
@@ -808,7 +821,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         diff_rev_prev = rev_t1 - rev_t2
         diff_rev_curr = rev_t - rev_t1
         
-        # 按要求格式化文案：增加/减少 + 增幅/降幅
+        # 🟢 [修改]：按要求格式化文案：增加/减少 + 增幅/降幅
         dir_rev_prev = "增加" if diff_rev_prev >= 0 else "减少"
         label_rev_prev = "增幅" if diff_rev_prev >= 0 else "降幅"
         pct_rev_prev = safe_pct(diff_rev_prev, rev_t2)
@@ -980,6 +993,7 @@ if not uploaded_excel:
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
+        * 利润表 -> `3.合并利润表`
         * 现金流 -> `4.合并现金流量表`
         * 财务指标 -> `5-3主要财务指标计算-方案3（专用公司债）`
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
