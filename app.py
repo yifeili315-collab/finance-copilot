@@ -40,7 +40,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     """🔥 生成精排版 Word 表格 (审计底稿风格)"""
     doc = Document()
     
-    # 设置页边距为窄边距，以容纳较宽的表格
+    # 设置页边距为窄边距
     section = doc.sections[0]
     section.left_margin = Cm(1.27)
     section.right_margin = Cm(1.27)
@@ -65,8 +65,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
     
-    # 动态计算列宽：首列略宽，数据列均匀分布
-    # 总可用宽度约 18.5cm。如果列数多，自动压缩数据列宽。
+    # 动态计算列宽
     num_cols = len(export_df.columns)
     if num_cols > 5:
         first_col_w = Cm(5.0)
@@ -88,7 +87,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
-        # 表头：上下粗框 (sz=12 -> 1.5pt)，左右细框
         set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
@@ -112,7 +110,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val) if pd.notna(val) and val != "" else ""
-            # 最后一行底部粗框，其他行细框
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -324,7 +321,13 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.error(f"❌ 数据处理错误: {e}")
         return
 
+    # 🟢 [修改]：过滤掉三年数据全为0的行（保留标题行，即含冒号的）
     df = df_raw.copy()
+    # 筛选条件：保留 (至少有一年不为0) OR (是标题行)
+    mask_keep = ~((df['T'] == 0) & (df['T_1'] == 0) & (df['T_2'] == 0)) 
+    mask_title = df.index.astype(str).str.contains(r'[:：]')
+    df = df[mask_keep | mask_title]
+
     for period in ['T', 'T_1', 'T_2']:
         total = total_row[period]
         if total != 0: df[f'占比_{period}'] = df[period] / total
@@ -348,7 +351,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         final_df[f"{d_t2}"] = display_df['fmt_T_2']
         final_df[" 占比(%)"] = display_df['fmt_pct_T_2']
         
-        # 🟢 清空以冒号结尾的标题行数据（如“流动资产：”）
+        # 清空以冒号结尾的标题行数据
         for idx in final_df.index:
             if str(idx).strip().endswith("：") or str(idx).strip().endswith(":"):
                 final_df.loc[idx] = ""
@@ -703,19 +706,19 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         
         # T (Latest)
         val_t = r['T']
-        pct_t = val_t / rev_t * 100 if rev_t else 0
+        pct_t = val_t / period_expenses['T'] * 100 if period_expenses['T'] else 0
         row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}%"])
         sum_t += val_t
         
         # T-1
         val_t1 = r['T_1']
-        pct_t1 = val_t1 / rev_t1 * 100 if rev_t1 else 0
+        pct_t1 = val_t1 / period_expenses['T_1'] * 100 if period_expenses['T_1'] else 0
         row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}%"])
         sum_t1 += val_t1
 
         # T-2
         val_t2 = r['T_2']
-        pct_t2 = val_t2 / rev_t2 * 100 if rev_t2 else 0
+        pct_t2 = val_t2 / period_expenses['T_2'] * 100 if period_expenses['T_2'] else 0
         row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}%"])
         sum_t2 += val_t2
         
@@ -724,22 +727,19 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     # 🟢 [新增]：添加期间费用合计行
     total_row = ["期间费用合计"]
     # T
-    total_pct_t = sum_t / rev_t * 100 if rev_t else 0
-    total_row.extend([f"{sum_t:,.2f}", f"{total_pct_t:.2f}%"])
+    total_row.extend([f"{sum_t:,.2f}", "100.00%"])
     # T-1
-    total_pct_t1 = sum_t1 / rev_t1 * 100 if rev_t1 else 0
-    total_row.extend([f"{sum_t1:,.2f}", f"{total_pct_t1:.2f}%"])
+    total_row.extend([f"{sum_t1:,.2f}", "100.00%"])
     # T-2
-    total_pct_t2 = sum_t2 / rev_t2 * 100 if rev_t2 else 0
-    total_row.extend([f"{sum_t2:,.2f}", f"{total_pct_t2:.2f}%"])
+    total_row.extend([f"{sum_t2:,.2f}", "100.00%"])
     
     period_exp_data.append(total_row)
     
-    # 🟢 [修复]：使用带年份的列名，避免 Duplicate column names 错误
+    # 🟢 [修复]：修正表头为“占期间费用比例”
     pe_cols = ["项目", 
-               f"{d_t}金额", f"{d_t}占比", 
-               f"{d_t1}金额", f"{d_t1}占比",
-               f"{d_t2}金额", f"{d_t2}占比"]
+               f"{d_t}金额", f"占期间费用比例", 
+               f"{d_t1}金额", f"占期间费用比例",
+               f"{d_t2}金额", f"占期间费用比例"]
     
     df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
@@ -980,6 +980,7 @@ if not uploaded_excel:
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
+        * 利润表 -> `3.合并利润表`
         * 现金流 -> `4.合并现金流量表`
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
     3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
