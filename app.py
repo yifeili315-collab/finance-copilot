@@ -478,9 +478,9 @@ def calculate_cash_flow_percentages(df_raw, d_labels):
                 pct_t = safe_pct(row['T'], denom_row['T'])
                 pct_t1 = safe_pct(row['T_1'], denom_row['T_1'])
                 pct_t2 = safe_pct(row['T_2'], denom_row['T_2'])
-                # 🟢 [修改]：把 % 放在表头，单元格内仅显示数字
+                # 把 % 放在表头，单元格内仅显示数字
                 data_list.append([subject, f"{pct_t:.2f}", f"{pct_t1:.2f}", f"{pct_t2:.2f}"])
-    # 🟢 [修改]：表头增加 (%)
+    # 表头增加 (%)
     return pd.DataFrame(data_list, columns=["项目", f"{d_t}占比(%)", f"{d_t1}占比(%)", f"{d_t2}占比(%)"]).set_index("项目")
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
@@ -656,7 +656,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
-            # 如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
+            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
             if item in ['销售费用', '管理费用', '研发费用', '财务费用', '营业外收入', '营业外支出']:
                 if val_t == 0 and val_t1 == 0 and val_t2 == 0:
                     continue
@@ -705,6 +705,9 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         for i in range(len(subset)):
             row = subset.iloc[i]
             if "费用" in str(row.name):
+                # 🟢 [修改]：排除 "利息费用"
+                if "利息" in str(row.name):
+                    continue
                 all_expense_rows.append(row)
     else:
         # Fallback if structure not found
@@ -777,6 +780,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     with tab2:
         c1, c2, c3 = st.columns([6, 1.2, 1.2])
         with c1: st.markdown("### 期间费用分析表")
+        st.info("💡 **说明**：系统已自动剔除“利息费用”（因其包含在“财务费用”中），避免重复计算期间费用合计。")
         with c2:
             doc_file_pe = create_word_table_file(df_period_exp, title="期间费用分析表")
             st.download_button("📥 下载 Word", doc_file_pe, "期间费用分析表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
