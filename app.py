@@ -245,19 +245,16 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
         
-        # 🔥 核心修改：动态分母文字，避免负债分析时说"占总资产比例"
         denom_text = "总资产" if analysis_name == "资产" else f"{analysis_name}总额"
 
         for subject in major_subjects:
             row = df.loc[subject]
             
-            # 1. 计算 T-1 较 T-2 的变动 (Trend 1)
             diff_prev = row['T_1'] - row['T_2']
             pct_prev = safe_pct(diff_prev, row['T_2'])
             dir_prev = "增加" if diff_prev >= 0 else "减少"
             label_prev = "增幅" if diff_prev >= 0 else "降幅"
 
-            # 2. 计算 T 较 T-1 的变动 (Trend 2)
             diff_curr = row['T'] - row['T_1']
             pct_curr = safe_pct(diff_curr, row['T_1'])
             dir_curr = "增加" if diff_curr >= 0 else "减少"
@@ -296,18 +293,29 @@ with st.sidebar:
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
     st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
+    
     st.markdown("""
     ### 🛑 使用前必读 (Requirements)
     为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    1. **Sheet 名称严格匹配**：资产表为 `1.合并资产表`，负债表为 `2.合并负债表`。
-    2. **数据列位置固定**：系统默认读取 **E、F、G 列**（即模版中的“万元”列）。
-    3. **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
+    
+    1.  **Sheet 名称严格匹配**：
+        * 资产表 -> `1.合并资产表`
+        * 负债表 -> `2.合并负债表`
+    2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
+    3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
+    
+    > **💡 小技巧：如何自定义日期名称？**
+    > 系统会自动提取 Excel 表头中 **【 】** 或 **[ ]** 里的文字。
+    > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
+    > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
+    
     ---
     ### 🚀 快速上手：
-    1. **左侧上传**：拖入 Excel 底稿和 Word 附注。
-    2. **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3. **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)，直接粘贴到报告中。
+    1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
+    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
+    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
     """)
+    
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
 else:
