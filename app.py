@@ -286,7 +286,7 @@ with st.sidebar:
     with st.expander("⚙️ 高级设置 (Sheet名称/表头行)"):
         header_row = st.number_input("表头所在行 (默认2，即第3行)", value=2, min_value=0)
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
-        sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债表")
+        sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
 
 # ================= 4. 主程序 =================
 
@@ -300,7 +300,7 @@ if not uploaded_excel:
     
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
-        * 负债表 -> `2.合并负债表`
+        * 负债表 -> `2.合并负债及权益表`
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
     3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
     
@@ -313,7 +313,7 @@ if not uploaded_excel:
     ### 🚀 快速上手：
     1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
     2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/数字Times*NewRoman/合计加粗/1.5磅网格边框)。
+    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/数字Times**NewRoman/合计部分加粗/1.5磅网格边框)。
     """)
     
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
