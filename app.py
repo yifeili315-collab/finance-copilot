@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
+from docx.shared import Pt, Cm
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
@@ -37,10 +37,7 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """
-    🔥 生成精排版 Word 表格
-    bold_rows: 列表，包含需要加粗的“科目名称”关键词
-    """
+    """🔥 生成精排版 Word 表格"""
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -65,7 +62,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         for row in table.rows:
             row.cells[i].width = width
 
-    # 表头
     hdr_cells = table.rows[0].cells
     table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
     table.rows[0].height = Cm(0.8)
@@ -87,50 +83,33 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
             run.font.name = 'Times New Roman'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
-    # 数据填充
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
         table.rows[r_idx+1].height = Cm(0.8)
 
         subject_name = str(row[0]).strip()
-        
-        # 🔥 智能加粗逻辑：
-        # 1. 显式指定的行
-        # 2. 包含“合计”、“总计”、“净额”、“净增加额”的行
-        # 3. 以“：”结尾的行（小标题）
         is_bold = False
-        if bold_rows and subject_name in bold_rows:
-            is_bold = True
-        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额"]):
-            is_bold = True
-        elif subject_name.endswith("：") or subject_name.endswith(":"):
-            is_bold = True
+        if bold_rows and subject_name in bold_rows: is_bold = True
+        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额"]): is_bold = True
+        elif subject_name.endswith("：") or subject_name.endswith(":"): is_bold = True
 
         for i, val in enumerate(row):
             cell = row_cells[i]
-            # 如果值是空或者NaN，显示为空字符串
             cell.text = str(val) if pd.notna(val) and val != "" else ""
-            
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             left_sz = 12 if i == 0 else 4
             right_sz = 12 if i == len(export_df.columns) - 1 else 4
             set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": left_sz}, right={"val": "single", "sz": right_sz})
-            
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             paragraph = cell.paragraphs[0]
-            if i == 0:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT # 科目靠左
-            else:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT # 数字靠右
-            
+            if i == 0: paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            else: paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             for run in paragraph.runs:
                 run.font.size = Pt(10.5) if is_bold else Pt(9)
                 run.font.name = 'Times New Roman'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-                if is_bold:
-                    run.font.bold = True
-                    
+                if is_bold: run.font.bold = True
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
@@ -181,37 +160,23 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
+# 🔥 核心：模糊查找函数 (移动到这里，确保被定义)
 def find_row_fuzzy(df, keywords, default_val=None):
-    """
-    在 DataFrame 索引中查找包含关键词的行。
-    返回一个 Series (行数据)。如果找不到，返回 default_val 或者全0 Series。
-    """
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
-    
-    # 1. 尝试精确匹配
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
-        mask = clean_index == clean_kw
-        if mask.any():
-            return df.loc[df.index[mask][0]]
-            
-    # 2. 尝试包含匹配
+        mask = clean_index == clean_kw 
+        if mask.any(): return df.loc[df.index[mask][0]]
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask = clean_index.str.contains(clean_kw, case=False, na=False)
-        if mask.any():
-            return df.loc[df.index[mask][0]]
-            
-    # 找不到的处理
-    if default_val is not None:
-        return default_val
-    # 返回一个全 0 的 Series，索引与 df 列一致，防止后续计算报错
+        if mask.any(): return df.loc[df.index[mask][0]]
+    if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
-# ================= 3. 业务逻辑：资产/负债 =================
+# ================= 3. 业务逻辑 =================
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
-    # (此函数保持 v8.8 逻辑不变，用于资产负债)
     try:
         if analysis_name == "负债":
              index_series = df_raw.index.astype(str)
@@ -226,11 +191,9 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                  if isinstance(idx_pos, int): df_raw = df_raw.iloc[:idx_pos + 1]
         
         total_row = find_row_fuzzy(df_raw, [total_col_name])
-        # 如果 total_row 是全0（没找到），报错
         if total_row.sum() == 0 and total_row.name is None:
              st.error(f"❌ 未找到合计行：{total_col_name}")
              return
-
     except Exception as e:
         st.error(f"❌ 数据处理错误: {e}")
         return
@@ -238,15 +201,11 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
     df = df_raw.copy()
     for period in ['T', 'T_1', 'T_2']:
         total = total_row[period]
-        if total != 0:
-            df[f'占比_{period}'] = df[period] / total
-        else:
-            df[f'占比_{period}'] = 0.0
+        if total != 0: df[f'占比_{period}'] = df[period] / total
+        else: df[f'占比_{period}'] = 0.0
 
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
-    
-    # ... (Tab1, Tab2, Tab3 代码与 v8.8 保持一致，为节省篇幅略去重复部分，下文重点写现金流) ...
-    # 为了完整性，这里我还是把 Tab1/2/3 简写放进去，确保你能直接运行
+
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown(f"### {analysis_name}结构明细")
@@ -276,8 +235,8 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         text = ""
         try:
             if analysis_name == "资产":
-                curr_row = find_row_fuzzy(df_raw, ['流动资产合计'])
-                non_curr_row = find_row_fuzzy(df_raw, ['非流动资产合计'])
+                curr_row = find_row_fuzzy(df_raw, ['流动资产合计', '流动资产小计'])
+                non_curr_row = find_row_fuzzy(df_raw, ['非流动资产合计', '非流动资产小计'])
                 text = (f"报告期内，发行人资产总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"其中，流动资产金额分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
                         f"占总资产的比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%；\n\n"
@@ -285,8 +244,8 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"占总资产的比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。\n\n"
                         f"在总资产构成中，公司资产主要为 **{'、'.join(top_5)}** 等。")
             elif analysis_name == "负债":
-                curr_row = find_row_fuzzy(df_raw, ['流动负债合计'])
-                non_curr_row = find_row_fuzzy(df_raw, ['非流动负债合计'])
+                curr_row = find_row_fuzzy(df_raw, ['流动负债合计', '流动负债小计'])
+                non_curr_row = find_row_fuzzy(df_raw, ['非流动负债合计', '非流动负债小计'])
                 diff_prev = total_row['T_1'] - total_row['T_2']
                 pct_prev = safe_pct(diff_prev, total_row['T_2'])
                 dir_prev = "增加" if diff_prev >= 0 else "减少"
@@ -332,65 +291,24 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.code(prompt, language='text')
 
-# ================= 4. 业务逻辑：现金流量 =================
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
-    """
-    处理现金流量表的特殊逻辑：
-    1. 提取特定行重组表格。
-    2. 生成三段式深度分析文案。
-    """
-    
-    # 1. 定义需要的行结构 (Display Name -> Search Keywords)
-    # 使用 list of tuples: (显示名称, 搜索关键词列表)
-    structure = [
-        ("经营活动产生的现金流量：", None), # 标题行，无数据
-        ("经营活动现金流入小计", ["经营活动现金流入小计", "经营活动产生的现金流入小计"]),
-        ("经营活动现金流出小计", ["经营活动现金流出小计", "经营活动产生的现金流出小计"]),
-        ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额", "经营活动产生现金流量净额"]),
-        ("投资活动产生的现金流量：", None),
-        ("投资活动现金流入小计", ["投资活动现金流入小计", "投资活动产生的现金流入小计"]),
-        ("投资活动现金流出小计", ["投资活动现金流出小计", "投资活动产生的现金流出小计"]),
-        ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]),
-        ("筹资活动产生的现金流量：", None),
-        ("筹资活动现金流入小计", ["筹资活动现金流入小计"]),
-        ("筹资活动现金流出小计", ["筹资活动现金流出小计"]),
-        ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]),
-        ("现金及现金等价物净增加额", ["现金及现金等价物净增加额", "五、现金及现金等价物净增加额"])
-    ]
-
-    # 2. 构建新的 DataFrame
+    structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
-    
     for display_name, keywords in structure:
-        if keywords is None:
-            # 标题行，填空
-            data_list.append([display_name, "", "", ""])
+        if keywords is None: data_list.append([display_name, "", "", ""])
         else:
-            # 数据行，查找数据
             row = find_row_fuzzy(df_raw, keywords)
-            # 如果没找到，row是全0 series，name是None。我们填空或者填0
-            if row.name is None:
-                val_t, val_t1, val_t2 = 0, 0, 0
-            else:
-                val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
-            
-            # 格式化
-            fmt_t = f"{val_t:,.2f}" if val_t != "" else ""
-            fmt_t1 = f"{val_t1:,.2f}" if val_t1 != "" else ""
-            fmt_t2 = f"{val_t2:,.2f}" if val_t2 != "" else ""
-            
-            data_list.append([display_name, fmt_t, fmt_t1, fmt_t2])
-
+            if row.name is None: val_t, val_t1, val_t2 = 0, 0, 0
+            else: val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
+            data_list.append([display_name, f"{val_t:,.2f}" if val_t!="" else "", f"{val_t1:,.2f}" if val_t1!="" else "", f"{val_t2:,.2f}" if val_t2!="" else ""])
     df_display = pd.DataFrame(data_list, columns=["项目", d_labels[0], d_labels[1], d_labels[2]])
     df_display.set_index("项目", inplace=True)
 
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
-
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown("### 现金流量结构明细")
         with c2:
-            # Word 导出
             doc_file = create_word_table_file(df_display, title="现金流量表摘要")
             st.download_button("📥 下载 Word", doc_file, "现金流量表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         with c3:
@@ -400,52 +318,32 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
 
     with tab2:
         st.markdown("👇 **直接复制：**")
-        
-        # --- 提取文案需要的具体数据 ---
-        # 辅助函数：获取某行某列的值（数值型）
-        def get_val(keywords, col):
-            row = find_row_fuzzy(df_raw, keywords)
-            return row[col] if row.name is not None else 0.0
-
-        # 1. 经营活动数据
         op_in_total = find_row_fuzzy(df_raw, ["经营活动现金流入小计"])
         op_out_total = find_row_fuzzy(df_raw, ["经营活动现金流出小计"])
         op_net = find_row_fuzzy(df_raw, ["经营活动产生的现金流量净额"])
-        
-        # 细分项
         op_sales = find_row_fuzzy(df_raw, ["销售商品、提供劳务收到的现金"])
         op_other_in = find_row_fuzzy(df_raw, ["收到其他与经营活动有关的现金"])
         op_buy = find_row_fuzzy(df_raw, ["购买商品、接受劳务支付的现金"])
         op_other_out = find_row_fuzzy(df_raw, ["支付其他与经营活动有关的现金"])
-
-        # 2. 投资活动数据
         inv_net = find_row_fuzzy(df_raw, ["投资活动产生的现金流量净额"])
         inv_in_total = find_row_fuzzy(df_raw, ["投资活动现金流入小计"])
         inv_out_total = find_row_fuzzy(df_raw, ["投资活动现金流出小计"])
         inv_buy_asset = find_row_fuzzy(df_raw, ["购建固定资产、无形资产和其他长期资产支付的现金"])
-
-        # 3. 筹资活动数据
         fin_net = find_row_fuzzy(df_raw, ["筹资活动产生的现金流量净额"])
         fin_in_total = find_row_fuzzy(df_raw, ["筹资活动现金流入小计"])
         fin_borrow_in = find_row_fuzzy(df_raw, ["取得借款收到的现金"])
         fin_invest_in = find_row_fuzzy(df_raw, ["吸收投资收到的现金"])
-        
         fin_out_total = find_row_fuzzy(df_raw, ["筹资活动现金流出小计"])
         fin_repay = find_row_fuzzy(df_raw, ["偿还债务支付的现金"])
         fin_interest = find_row_fuzzy(df_raw, ["分配股利、利润或偿付利息支付的现金"])
 
-        # --- 生成文案 ---
-        text = ""
-        
-        # Part 1: 经营活动
-        text += "**1、经营活动产生的现金流量分析**\n\n"
+        text = "**1、经营活动产生的现金流量分析**\n\n"
         text += (f"报告期内，发行人经营活动现金流入分别为{op_in_total['T_2']:,.2f}万元、{op_in_total['T_1']:,.2f}万元和{op_in_total['T']:,.2f}万元。"
                  f"其中，销售商品、提供劳务收到的现金分别为{op_sales['T_2']:,.2f}万元、{op_sales['T_1']:,.2f}万元及{op_sales['T']:,.2f}万元，"
                  f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；"
                  f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
                  f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
                  f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
-        
         text += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。"
                  f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
                  f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
@@ -453,11 +351,9 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                  f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
                  f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
                  f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
-                 
         text += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
                  f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。\n\n")
 
-        # Part 2: 投资活动
         text += "**2、投资活动产生的现金流量分析**\n\n"
         text += (f"报告期内，发行人投资活动产生的现金流量净额分别为{inv_net['T_2']:,.2f}万元、{inv_net['T_1']:,.2f}万元和{inv_net['T']:,.2f}万元。"
                  f"投资活动现金流入分别为{inv_in_total['T_2']:,.2f}万元、{inv_in_total['T_1']:,.2f}万元及{inv_in_total['T']:,.2f}万元；"
@@ -466,53 +362,34 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                  f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。"
                  f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。\n\n")
 
-        # Part 3: 筹资活动
         text += "**3、筹资活动产生的现金流量分析**\n\n"
         text += (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。"
                  f"报告期内筹资活动产生的现金流量净额较大，主要系吸收投资收到的现金及取得借款收到的现金流入所致。\n\n")
-        
         text += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由取得借款所收到的现金及吸收投资收到的现金构成。"
                  f"{d_labels[2]}、{d_labels[1]}及{d_labels[0]}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
                  f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
                  f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
-                 
         text += (f"{d_labels[2]}、{d_labels[1]}及{d_labels[0]}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
                  f"发行人筹资活动现金流出主要由偿还债务所支付的现金及分配股利、利润或偿付利息支付的现金构成。"
                  f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
                  f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
-
         st.code(text, language='text')
 
     with tab3:
-        st.info("💡 **提示**：现金流量分析通常侧重于三大活动的净额变动。以下为您生成针对三大活动净额的分析指令。")
-        st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
-        
-        # 现金流只要分析这三个净额即可
+        st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
+        if word_data_list: st.success(f"✅ 已结合 Word 附注生成指令。")
+        else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据。")
         target_subjects = ["经营活动产生的现金流量净额", "投资活动产生的现金流量净额", "筹资活动产生的现金流量净额"]
-        
         for subject in target_subjects:
             row = find_row_fuzzy(df_raw, [subject])
-            if row.name is None: continue # 没找到就不生成
-            
+            if row.name is None: continue
             diff_prev = row['T_1'] - row['T_2']
             diff_curr = row['T'] - row['T_1']
-            # 净额通常不计算百分比变动（因为可能正负交替，分母为负时无意义），只看绝对值变动方向
-            
             dir_prev = "增加" if diff_prev >= 0 else "减少"
             dir_curr = "增加" if diff_curr >= 0 else "减少"
-            
-            prompt = f"""【任务】分析“{subject}”变动原因。
-【1. 数据趋势】
-{d_t2}、{d_t1}及{d_t}，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。
-【2. 变动情况】
-截至{d_t1}，较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元；
-截至{d_t}，较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元。
-"""
-            if word_data_list:
-                prompt += f"""\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n【4. 写作要求】\n结合数据和附注分析原因。"""
-            
-            with st.expander(f"📌 {subject}"):
-                st.code(prompt, language='text')
+            prompt = f"""【任务】分析“{subject}”变动原因。\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n【2. 变动情况】\n截至{d_t1}，较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元；\n截至{d_t}，较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元。"""
+            if word_data_list: prompt += f"""\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n【4. 写作要求】\n结合数据和附注分析原因。"""
+            with st.expander(f"📌 {subject}"): st.code(prompt, language='text')
 
 # ================= 3. 侧边栏 =================
 with st.sidebar:
@@ -543,6 +420,12 @@ if not uploaded_excel:
         * 现金流 -> `4.合并现金流量表`
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
     3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
+    
+    > **💡 小技巧：如何自定义日期名称？**
+    > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
+    > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
+    > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
+    ---
     """)
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
