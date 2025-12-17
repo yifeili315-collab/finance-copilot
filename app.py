@@ -587,7 +587,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
-            # 🟢 [修改]：按要求格式化文案
+            # 按要求格式化文案
             cf_text = (f"报告期各期，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n"
                      f"截至{d_t1}，发行人{subject}较{d_t2}净{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n"
                      f"截至{d_t}，发行人{subject}较{d_t1}净{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。\n\n"
@@ -641,7 +641,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
-            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除)
+            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
             if item in ['销售费用', '管理费用', '研发费用', '财务费用', '营业外收入', '营业外支出']:
                 if val_t == 0 and val_t1 == 0 and val_t2 == 0:
                     continue
@@ -680,7 +680,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         r_val = rev_t if col == 'T' else (rev_t1 if col == 'T_1' else rev_t2)
         pe_ratios[col] = period_expenses[col] / r_val * 100 if r_val != 0 else 0.0
     
-    # 🟢 [新增]：查找期间费用分析所需的所有费用行
+    # 查找期间费用分析所需的所有费用行
     idx_start = find_index_fuzzy(df_raw, ['营业总成本', '二、营业总成本'])
     idx_end = find_index_fuzzy(df_raw, ['资产减值损失', '加：资产减值损失', '投资收益'])
     
@@ -697,7 +697,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
              r = find_row_fuzzy(df_raw, [kw])
              if r.name: all_expense_rows.append(r)
 
-    # 🟢 [新增]：构建期间费用分析表格数据
+    # 🟢 [修改]：期间费用占比计算逻辑修正 (分母改为 period_expenses)
     period_exp_data = []
     sum_t, sum_t1, sum_t2 = 0, 0, 0 # 用于计算合计
 
@@ -724,7 +724,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         
         period_exp_data.append(row_dat)
     
-    # 🟢 [新增]：添加期间费用合计行
+    # 添加期间费用合计行
     total_row = ["期间费用合计"]
     # T
     total_row.extend([f"{sum_t:,.2f}", "100.00%"])
@@ -735,11 +735,11 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     
     period_exp_data.append(total_row)
     
-    # 🟢 [修复]：修正表头为“占期间费用比例”
+    # 🟢 [修复]：使用带年份的列名，并将 "占营业收入比例" 改为 "占期间费用比例"
     pe_cols = ["项目", 
-               f"{d_t}金额", f"占期间费用比例", 
-               f"{d_t1}金额", f"占期间费用比例",
-               f"{d_t2}金额", f"占期间费用比例"]
+               f"{d_t}金额", f"{d_t}占期间费用比例", 
+               f"{d_t1}金额", f"{d_t1}占期间费用比例",
+               f"{d_t2}金额", f"{d_t2}占期间费用比例"]
     
     df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
@@ -757,7 +757,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             st.download_button("📥 下载 Excel", excel_file, "盈利能力表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.dataframe(df_fmt, use_container_width=True)
     
-    # 🟢 [新增]：期间费用分析 Tab 内容
+    # 期间费用分析 Tab 内容
     with tab2:
         c1, c2, c3 = st.columns([6, 1.2, 1.2])
         with c1: st.markdown("### 期间费用分析表")
@@ -808,7 +808,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         diff_rev_prev = rev_t1 - rev_t2
         diff_rev_curr = rev_t - rev_t1
         
-        # 🟢 [修改]：按要求格式化文案：增加/减少 + 增幅/降幅
+        # 按要求格式化文案：增加/减少 + 增幅/降幅
         dir_rev_prev = "增加" if diff_rev_prev >= 0 else "减少"
         label_rev_prev = "增幅" if diff_rev_prev >= 0 else "降幅"
         pct_rev_prev = safe_pct(diff_rev_prev, rev_t2)
@@ -980,8 +980,8 @@ if not uploaded_excel:
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
-        * 利润表 -> `3.合并利润表`
         * 现金流 -> `4.合并现金流量表`
+        * 财务指标 -> `5-3主要财务指标计算-方案3（专用公司债）`
     2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
     3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
 
