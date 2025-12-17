@@ -326,6 +326,12 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         final_df["占比(%)"] = display_df['fmt_pct_T_1']
         final_df[f"{d_t2}"] = display_df['fmt_T_2']
         final_df[" 占比(%)"] = display_df['fmt_pct_T_2']
+        
+        # 🟢 [修改]：清空以冒号结尾的标题行数据（如“流动资产：”）
+        for idx in final_df.index:
+            if str(idx).strip().endswith("：") or str(idx).strip().endswith(":"):
+                final_df.loc[idx] = ""
+
         with c2:
             doc_file = create_word_table_file(final_df, title=f"{analysis_name}结构情况表")
             st.download_button(f"📥 下载 Word", doc_file, f"{analysis_name}明细.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
