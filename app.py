@@ -195,7 +195,6 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
 
 def smart_load_ratios(file_obj, sheet_name):
     try:
-        # 1. 先不带表头读取，扫描前 10 行找 "项目" 或 "指标"
         df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None)
         header_idx = -1
         for i in range(10):
@@ -206,34 +205,26 @@ def smart_load_ratios(file_obj, sheet_name):
         
         if header_idx == -1: header_idx = 1
             
-        # 2. 重新读取
         df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_idx)
         
-        # 3. 智能寻找日期列
         cols = df.columns.tolist()
         date_col_indices = []
-        
-        # 寻找包含 "年"、"T"、"20xx" 的列
         for idx, col_name in enumerate(cols):
             s = str(col_name)
             if "年" in s or "T" in s or "202" in s or "期" in s:
                 date_col_indices.append(idx)
         
-        # 默认取第1列(项目) + 找到的前3个日期列
         if len(date_col_indices) >= 3:
             target_cols = [0] + date_col_indices[:3]
         else:
-            # 找不到就猜：C, D, E 列
             target_cols = [0, 2, 3, 4]
             
         df_final = df.iloc[:, target_cols]
         
-        # 4. 标准化列名
         orig_cols = df_final.columns.tolist()
         d_labels = [extract_date_label(c) for c in orig_cols[1:]]
         df_final.columns = ['科目', 'T', 'T_1', 'T_2']
         
-        # 5. 清洗
         df_final = df_final.dropna(subset=['科目'])
         df_final['科目'] = df_final['科目'].astype(str).str.strip()
         for c in ['T', 'T_1', 'T_2']:
@@ -245,22 +236,32 @@ def smart_load_ratios(file_obj, sheet_name):
     except Exception as e:
         raise Exception(f"智能读取失败: {str(e)}")
 
-def find_row_fuzzy(df, keywords, default_val=None):
+# 🔥 核心修正：增加 exclude_keywords 参数，防止混淆
+def find_row_fuzzy(df, keywords, exclude_keywords=None, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
     
-    # 1. 优先：完全匹配（去除空格后）
-    # 这样 "EBITDA" 不会匹配到 "EBITDA利息保障倍数"
+    # 1. 优先：完全匹配
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask = clean_index == clean_kw 
         if mask.any(): return df.loc[df.index[mask][0]]
         
-    # 2. 其次：包含匹配
+    # 2. 其次：包含匹配 (带排除逻辑)
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask = clean_index.str.contains(clean_kw, case=False, na=False)
-        if mask.any(): return df.loc[df.index[mask][0]]
+        
+        # 🔥 如果有排除词，进行过滤
+        if exclude_keywords:
+            for ex_kw in exclude_keywords:
+                clean_ex = ex_kw.replace(" ", "")
+                # 排除那些包含排除词的行
+                mask = mask & (~clean_index.str.contains(clean_ex, case=False, na=False))
+        
+        if mask.any(): 
+            # 默认返回第一个匹配项（解决重复问题）
+            return df.loc[df.index[mask][0]]
         
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
@@ -545,28 +546,46 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                 st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
 
 # ================= 5. 业务逻辑：财务指标分析 =================
+def smart_scale_convert(val, is_ebitda=False, is_ratio=False):
+    """根据数值量级自动修正单位"""
+    if pd.isna(val) or val == 0: return 0.0
+    if is_ebitda:
+        if abs(val) > 500000: return val / 10000.0 # 元转万元
+        elif abs(val) < 1000: return val * 10000.0 # 亿元转万元
+        else: return val # 默认万元
+    if is_ratio:
+        if abs(val) < 1.0: return val * 100.0 # 小数转百分比
+        return val
+    return val
+
 def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
-    # 🔥 核心修正：使用映射表，(展示名称, [搜索关键词列表])
+    # 🔥 核心修正：(显示名称, [搜索关键词], [排除关键词])
     metrics_config = [
-        ("资产负债率（%）", ["资产负债率"]),
-        ("流动比率（倍）", ["流动比率"]),
-        ("速动比率（倍）", ["速动比率"]),
-        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"]),
-        ("EBITDA利息保障倍数（倍）", ["EBITDA利息保障倍数", "利息保障倍数", "EBITDA利息倍数"])
+        ("资产负债率（%）", ["资产负债率"], None),
+        ("流动比率（倍）", ["流动比率"], None),
+        ("速动比率（倍）", ["速动比率"], None),
+        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"], ["倍", "比", "率", "/", "%"]), # 排除比率类
+        ("EBITDA利息保障倍数（倍）", ["EBITDA利息保障倍数", "利息保障倍数", "EBITDA利息倍数"], None)
     ]
     
     data_list = []
     data_map = {} 
     
-    for display_name, search_kws in metrics_config:
-        # 使用不带单位的关键词去模糊搜索
-        row = find_row_fuzzy(df_raw, search_kws)
+    for display_name, search_kws, ex_kws in metrics_config:
+        # 传入排除列表
+        row = find_row_fuzzy(df_raw, search_kws, exclude_keywords=ex_kws)
         
         val_t, val_t1, val_t2 = 0, 0, 0
         if row.name is not None:
-            val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
+            is_ebitda = "EBITDA（万元）" in display_name
+            is_ratio = "资产负债率" in display_name
+            
+            val_t = smart_scale_convert(row['T'], is_ebitda, is_ratio)
+            val_t1 = smart_scale_convert(row['T_1'], is_ebitda, is_ratio)
+            val_t2 = smart_scale_convert(row['T_2'], is_ebitda, is_ratio)
+            
             data_map[display_name] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
         
         if "EBITDA（万元）" in display_name:
