@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from docx import Document
-from docx.shared import Pt, Cm
+from docx.shared import Pt, Cm, RGBColor
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
@@ -19,7 +19,7 @@ st.set_page_config(
 # ================= 2. 核心逻辑函数 =================
 
 def set_cell_border(cell, **kwargs):
-    """设置单元格边框 (XML操作)"""
+    """设置单元格边框"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
@@ -37,9 +37,12 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """🔥 生成精排版 Word 表格 (五号字体，全居中)"""
+    """
+    🔥 生成精排版 Word 表格
+    - 字体：五号 (10.5pt)
+    - 对齐：水平居中 + 垂直居中
+    """
     doc = Document()
-    # 全局样式：五号字体 (10.5pt)
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
@@ -58,8 +61,8 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
     
-    # 列宽设置
-    col_widths = [Cm(6.0)] + [Cm(3.5)] * (len(export_df.columns) - 1)
+    # 列宽设置：第一列加宽，其余均匀
+    col_widths = [Cm(6.0)] + [Cm(3.0)] * (len(export_df.columns) - 1)
     for i, width in enumerate(col_widths):
         for row in table.rows:
             row.cells[i].width = width
@@ -67,22 +70,22 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     # --- 表头设置 ---
     hdr_cells = table.rows[0].cells
     table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    table.rows[0].height = Cm(1.0) # 表头略高
+    table.rows[0].height = Cm(1.0)
 
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
-        # 边框
         set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
-        # 垂直居中
+        
+        # 🔥 强制垂直居中
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        # 水平居中
+        
         paragraph = cell.paragraphs[0]
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER # 水平居中
         
         for run in paragraph.runs:
             run.font.bold = True
-            run.font.size = Pt(10.5) # 五号
+            run.font.size = Pt(10.5)
             run.font.name = 'Times New Roman'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
@@ -94,32 +97,33 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
 
         subject_name = str(row[0]).strip()
         
-        # 加粗逻辑
+        # 智能加粗判断
         is_bold = False
         if bold_rows and subject_name in bold_rows: is_bold = True
-        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额"]): is_bold = True
+        elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额", "构成", "活动"]): is_bold = True
         elif subject_name.endswith("：") or subject_name.endswith(":"): is_bold = True
 
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val) if pd.notna(val) and val != "" else ""
             
-            # 边框
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
             
-            # 🔥 核心需求：垂直居中 + 水平居中
-            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER 
+            # 🔥 强制垂直居中
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            
             paragraph = cell.paragraphs[0]
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER 
+            # 第一列（科目）如果不是小标题，稍微靠左一点可能更好看？但用户要求全都居中
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
             for run in paragraph.runs:
-                run.font.size = Pt(10.5) # 五号字体
+                run.font.size = Pt(10.5) # 五号
                 run.font.name = 'Times New Roman'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
                 if is_bold:
                     run.font.bold = True
-                    
+    
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
@@ -168,28 +172,25 @@ def extract_date_label(header_str):
     return s
 
 def safe_pct(num, denom):
-    return (num / denom * 100) if denom != 0 and pd.notna(num) and pd.notna(denom) else 0.0
+    return (num / denom * 100) if denom != 0 else 0.0
 
-# 🔥 核心：模糊查找 Excel Sheet
+# 模糊查找 Sheet
 def fuzzy_load_excel(file_obj, sheet_name, header_row):
     try:
         xl = pd.ExcelFile(file_obj)
         all_sheet_names = xl.sheet_names
-        
         if sheet_name in all_sheet_names:
             return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
-        
         clean_target = sheet_name.replace(" ", "")
         for actual_name in all_sheet_names:
             if actual_name.replace(" ", "") == clean_target:
                 st.toast(f"⚠️ 检测到 Sheet 名称不一致，已自动修正为：'{actual_name}'")
                 return pd.read_excel(file_obj, sheet_name=actual_name, header=header_row), None
-        
         return None, all_sheet_names
     except Exception as e:
         return None, [str(e)]
 
-# 🔥 核心：模糊查找行 (返回行对象)
+# 模糊查找行
 def find_row_fuzzy(df, keywords, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
@@ -204,7 +205,7 @@ def find_row_fuzzy(df, keywords, default_val=None):
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
-# 🔥 核心：模糊查找行索引 (返回数字 Index)
+# 模糊查找行索引
 def find_index_fuzzy(df, keywords):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
@@ -334,59 +335,52 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 # ================= 4. 业务逻辑：现金流量 =================
 def calculate_cash_flow_percentages(df_raw, d_labels):
     """
-    计算现金流各项占比
-    逻辑：
-    1. 经营流入占比：(经营流入项 / 经营流入小计)
-    2. 经营流出占比：(经营流出项 / 经营流出小计)
-    3. ...以此类推
+    计算现金流各项占比，并生成分级结构的 DataFrame
     """
-    pct_data = []
+    data_list = []
     d_t, d_t1, d_t2 = d_labels
 
     # 定义区间 (开始关键词, 结束关键词(即分母), 类别名称)
     # 注意：结束关键词既是区间终点，也是分母
     sections = [
-        (["经营活动产生的现金流量", "一、经营活动"], ["经营活动现金流入小计"], "经营活动现金流入"),
-        (["经营活动现金流入小计"], ["经营活动现金流出小计"], "经营活动现金流出"),
-        (["投资活动产生的现金流量", "二、投资活动"], ["投资活动现金流入小计"], "投资活动现金流入"),
-        (["投资活动现金流入小计"], ["投资活动现金流出小计"], "投资活动现金流出"),
-        (["筹资活动产生的现金流量", "三、筹资活动"], ["筹资活动现金流入小计"], "筹资活动现金流入"),
-        (["筹资活动现金流入小计"], ["筹资活动现金流出小计"], "筹资活动现金流出"),
+        (["经营活动产生的现金流量", "一、经营活动"], ["经营活动现金流入小计"], "一、经营活动现金流入构成"),
+        (["经营活动现金流入小计"], ["经营活动现金流出小计"], "二、经营活动现金流出构成"),
+        (["投资活动产生的现金流量", "二、投资活动"], ["投资活动现金流入小计"], "三、投资活动现金流入构成"),
+        (["投资活动现金流入小计"], ["投资活动现金流出小计"], "四、投资活动现金流出构成"),
+        (["筹资活动产生的现金流量", "三、筹资活动"], ["筹资活动现金流入小计"], "五、筹资活动现金流入构成"),
+        (["筹资活动现金流入小计"], ["筹资活动现金流出小计"], "六、筹资活动现金流出构成"),
     ]
 
     for start_kws, end_kws, cat_name in sections:
+        # 添加小标题行
+        data_list.append([cat_name, "", "", ""])
+        
         # 找索引
         idx_start = find_index_fuzzy(df_raw, start_kws)
         idx_end = find_index_fuzzy(df_raw, end_kws)
         
         if idx_start is not None and idx_end is not None and idx_end > idx_start:
-            # 获取分母行数据
             denom_row = df_raw.iloc[idx_end]
-            
-            # 遍历中间的行
-            # 区间是 (idx_start + 1) 到 (idx_end - 1)
             subset = df_raw.iloc[idx_start+1 : idx_end]
             
             for i in range(len(subset)):
                 row = subset.iloc[i]
                 subject = row.name
                 
-                # 跳过空行或无意义行
                 if not isinstance(subject, str) or len(subject.strip()) < 2: continue
                 
-                # 计算 T, T-1, T-2 的占比
                 pct_t = safe_pct(row['T'], denom_row['T'])
                 pct_t1 = safe_pct(row['T_1'], denom_row['T_1'])
                 pct_t2 = safe_pct(row['T_2'], denom_row['T_2'])
                 
-                pct_data.append([
-                    f"{cat_name} - {subject}", 
+                data_list.append([
+                    subject, 
                     f"{pct_t:.2f}%", 
                     f"{pct_t1:.2f}%", 
                     f"{pct_t2:.2f}%"
                 ])
     
-    return pd.DataFrame(pct_data, columns=["项目(占比)", f"{d_t}占比", f"{d_t1}占比", f"{d_t2}占比"]).set_index("项目(占比)")
+    return pd.DataFrame(data_list, columns=["项目", f"{d_t}占比", f"{d_t1}占比", f"{d_t2}占比"]).set_index("项目")
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
@@ -420,13 +414,15 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         st.dataframe(df_display, use_container_width=True)
 
     with tab2:
-        st.markdown("### 各项活动现金流占比分析")
-        st.info("💡 说明：流入项占比 = 科目/流入小计；流出项占比 = 科目/流出小计")
-        st.dataframe(df_pct, use_container_width=True)
-        c2_1, c2_2 = st.columns([1, 1])
-        with c2_1:
+        c1, c2 = st.columns([6, 1.5])
+        with c1: st.markdown("### 各项活动现金流占比分析")
+        with c2:
+            # 🔥 这里的占比表也用 Word 导出
             doc_pct = create_word_table_file(df_pct, title="现金流量占比表")
             st.download_button("📥 下载占比表 Word", doc_pct, "现金流占比.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        
+        st.info("💡 说明：流入项占比 = 科目/流入小计；流出项占比 = 科目/流出小计")
+        st.dataframe(df_pct, use_container_width=True)
 
     with tab3:
         st.markdown("👇 **直接复制（分块展示）：**")
