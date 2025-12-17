@@ -182,6 +182,7 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
         if target_sheet is None:
             return None, all_sheet_names
 
+        # 财务指标表特供逻辑
         if "财务指标" in sheet_name or "5-3" in sheet_name:
             return smart_load_ratios(file_obj, target_sheet)
         
@@ -199,56 +200,43 @@ def smart_load_ratios(file_obj, sheet_name):
             if any("项目" in v or "指标" in v for v in row_values):
                 header_idx = i
                 break
-        
         if header_idx == -1: header_idx = 1
-            
         df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_idx)
-        
         cols = df.columns.tolist()
         date_col_indices = []
         for idx, col_name in enumerate(cols):
             s = str(col_name)
             if "年" in s or "T" in s or "202" in s or "期" in s:
                 date_col_indices.append(idx)
-        
         if len(date_col_indices) >= 3:
             target_cols = [0] + date_col_indices[:3]
         else:
             target_cols = [0, 2, 3, 4]
-            
         df_final = df.iloc[:, target_cols]
         orig_cols = df_final.columns.tolist()
         d_labels = [extract_date_label(c) for c in orig_cols[1:]]
         df_final.columns = ['科目', 'T', 'T_1', 'T_2']
-        
         df_final = df_final.dropna(subset=['科目'])
         df_final['科目'] = df_final['科目'].astype(str).str.strip()
         for c in ['T', 'T_1', 'T_2']:
             df_final[c] = pd.to_numeric(df_final[c], errors='coerce').fillna(0)
         df_final.set_index('科目', inplace=True)
-        
         return df_final, d_labels
-
     except Exception as e:
         raise Exception(f"智能读取失败: {str(e)}")
 
-# 🔥 核心修正：智能择优 (Smart Row Picker)
 def find_row_fuzzy(df, keywords, exclude_keywords=None, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
     found_rows = []
-
-    # 1. 扫描所有匹配行
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask_exact = clean_index == clean_kw
         mask_contains = clean_index.str.contains(clean_kw, case=False, na=False)
-        
         if exclude_keywords:
             for ex_kw in exclude_keywords:
                 clean_ex = ex_kw.replace(" ", "")
                 mask_contains = mask_contains & (~clean_index.str.contains(clean_ex, case=False, na=False))
-        
         matched_indices = df.index[mask_exact | mask_contains].tolist()
         for idx in matched_indices:
             row = df.loc[idx]
@@ -256,25 +244,17 @@ def find_row_fuzzy(df, keywords, exclude_keywords=None, default_val=None):
                 for _, r in row.iterrows(): found_rows.append(r)
             else:
                 found_rows.append(row)
-    
-    # 2. 智能择优：寻找数据最全的那一行
     best_row = None
     max_non_zeros = -1
-    
     for row in found_rows:
-        # 计算该行非0非空的数据个数
         non_zeros = 0
         if row['T'] != 0 and pd.notna(row['T']): non_zeros += 1
         if row['T_1'] != 0 and pd.notna(row['T_1']): non_zeros += 1
         if row['T_2'] != 0 and pd.notna(row['T_2']): non_zeros += 1
-        
         if non_zeros > max_non_zeros:
             max_non_zeros = non_zeros
             best_row = row
-    
-    if best_row is not None:
-        return best_row
-
+    if best_row is not None: return best_row
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
@@ -287,28 +267,20 @@ def find_index_fuzzy(df, keywords):
         if mask.any(): return df.index.get_loc(df.index[mask][0])
     return None
 
-# 🔥 核心修正：智能单位自适应 (v11.8)
 def smart_scale_convert(val, subject_name="", is_ebitda=False, is_ratio=False):
     if pd.isna(val) or val == 0: return 0.0
-    
-    # 1. 显式单位优先
     if "亿元" in subject_name: return val * 10000.0
     if "万元" in subject_name: return val
     if "元" in subject_name and "万元" not in subject_name and "亿元" not in subject_name: return val / 10000.0
-
-    # 2. EBITDA 推断 (门槛：100万)
     if is_ebitda:
-        if abs(val) > 1000000: return val / 10000.0 # 大于100万视为元
-        else: return val # 否则视为万元
-            
-    # 3. 比率推断
+        if abs(val) > 1000000: return val / 10000.0
+        else: return val
     if is_ratio:
         if abs(val) < 1.0: return val * 100.0
         return val
-        
     return val
 
-# ================= 3. 业务逻辑：资产/负债 =================
+# ================= 3. 业务逻辑 =================
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
         if analysis_name == "负债":
@@ -363,7 +335,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.dataframe(final_df, use_container_width=True)
 
     with tab2:
-        st.markdown("👇 **直接复制（已开启自动换行）：**")
         top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
         text = ""
         try:
@@ -397,12 +368,10 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
-            
             with st.container(border=True):
                 st.markdown(f"#### 📝 {analysis_name}综述文案")
                 st.text_area("文案内容", value=text, height=300, label_visibility="collapsed")
                 st.caption("✨ 已自动优化排版，支持自动换行。点击框内按 Ctrl+A 即可全选。")
-
         except Exception as e:
              st.error(f"生成文案出错: {e}")
 
@@ -579,15 +548,170 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             with st.expander(f"📌 {subject}"):
                 st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
 
+# ================= 5. 业务逻辑：盈利能力分析 (NEW!) =================
+def process_profitability_tab(df_raw, word_data_list, d_labels):
+    d_t, d_t1, d_t2 = d_labels
+    
+    # 1. 查找关键行
+    def get_row(keywords):
+        return find_row_fuzzy(df_raw, keywords)
+
+    row_revenue = get_row(['营业收入'])
+    row_cost = get_row(['营业成本'])
+    row_op_profit = get_row(['营业利润', '三、营业利润'])
+    row_total_profit = get_row(['利润总额', '四、利润总额'])
+    row_net_profit = get_row(['净利润', '五、净利润'])
+    row_other_income = get_row(['其他收益']) # 占位，数据可能为0
+    row_non_op_in = get_row(['营业外收入'])
+    row_non_op_out = get_row(['营业外支出'])
+
+    # 2. 动态查找“费用”科目 (在营业总成本和资产减值损失之间)
+    idx_start = find_index_fuzzy(df_raw, ['营业总成本', '二、营业总成本'])
+    idx_end = find_index_fuzzy(df_raw, ['资产减值损失', '加：资产减值损失', '投资收益']) # 寻找结束锚点
+    
+    expense_rows = []
+    if idx_start and idx_end and idx_end > idx_start:
+        subset = df_raw.iloc[idx_start+1 : idx_end]
+        for i in range(len(subset)):
+            row = subset.iloc[i]
+            if "费用" in str(row.name):
+                expense_rows.append(row)
+    else:
+        # 如果找不到区间，尝试直接查找常见费用
+        for kw in ['销售费用', '管理费用', '研发费用', '财务费用']:
+            r = get_row([kw])
+            if r.name: expense_rows.append(r)
+
+    # 3. 构建表格数据
+    data_list = []
+    # 固定项目1
+    fixed_1 = [row_revenue, row_cost]
+    for r in fixed_1:
+        data_list.append([r.name if r.name else "未找到", r['T'], r['T_1'], r['T_2']])
+    
+    # 费用项目
+    for r in expense_rows:
+        data_list.append([r.name, r['T'], r['T_1'], r['T_2']])
+        
+    # 其他收益 (空)
+    data_list.append(["其他收益", "", "", ""])
+    
+    # 固定项目2
+    fixed_2 = [row_op_profit, row_non_op_in, row_non_op_out, row_total_profit, row_net_profit]
+    for r in fixed_2:
+        val_t = r['T'] if r.name else ""
+        val_t1 = r['T_1'] if r.name else ""
+        val_t2 = r['T_2'] if r.name else ""
+        data_list.append([r.name if r.name else "未找到", val_t, val_t1, val_t2])
+        
+    # 最后的空行
+    data_list.append(["营业毛利率", "", "", ""])
+    data_list.append(["平均总资产回报率", "", "", ""])
+
+    # 转 DataFrame 并格式化
+    df_display = pd.DataFrame(data_list, columns=["项目", 'T_raw', 'T_1_raw', 'T_2_raw'])
+    
+    # 格式化显示用
+    df_fmt = df_display.copy()
+    df_fmt.columns = ["项目", d_t, d_t1, d_t2]
+    for col in [d_t, d_t1, d_t2]:
+        df_fmt[col] = df_fmt[col].apply(lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) else x)
+    df_fmt.set_index("项目", inplace=True)
+
+    # 4. 计算逻辑 (用于文案)
+    # 毛利率
+    margins = {}
+    for col in ['T', 'T_1', 'T_2']:
+        rev = row_revenue[col]
+        cost = row_cost[col]
+        margins[col] = (rev - cost) / rev * 100 if rev != 0 else 0.0
+
+    # 期间费用总额及占比
+    period_expenses = {
+        'T': sum([r['T'] for r in expense_rows]),
+        'T_1': sum([r['T_1'] for r in expense_rows]),
+        'T_2': sum([r['T_2'] for r in expense_rows])
+    }
+    pe_ratios = {} # 占营收比例
+    for col in ['T', 'T_1', 'T_2']:
+        rev = row_revenue[col]
+        pe_ratios[col] = period_expenses[col] / rev * 100 if rev != 0 else 0.0
+
+    # UI 展示
+    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
+
+    with tab1:
+        c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
+        with c1: st.markdown("### 盈利能力明细表")
+        with c2:
+            doc_file = create_word_table_file(df_fmt, title="盈利能力分析表")
+            st.download_button("📥 下载 Word", doc_file, "盈利能力表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        with c3:
+            excel_file = create_excel_file(df_fmt)
+            st.download_button("📥 下载 Excel", excel_file, "盈利能力表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.dataframe(df_fmt, use_container_width=True)
+
+    with tab2:
+        with st.container(border=True):
+            st.markdown("#### 📝 1、营业收入、营业成本和毛利率分析")
+            text_1 = (f"报告期内，发行人各期的营业收入分别为{row_revenue['T_2']:,.2f}万元、{row_revenue['T_1']:,.2f}万元和{row_revenue['T']:,.2f}万元，"
+                      f"营业成本分别为{row_cost['T_2']:,.2f}万元、{row_cost['T_1']:,.2f}万元和{row_cost['T']:,.2f}万元，"
+                      f"营业毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%和{margins['T']:.2f}%。\n\n"
+                      f"发行人以（）为主要业务，主要业务毛利水平较稳定。")
+            st.text_area("文案 - 收入成本毛利", value=text_1, height=200, label_visibility="collapsed")
+
+        with st.container(border=True):
+            st.markdown("#### 📝 2、期间费用分析")
+            expense_names = "、".join([r.name for r in expense_rows])
+            text_2 = (f"报告期内，发行人期间费用总额分别为{period_expenses['T_2']:,.2f}万元、{period_expenses['T_1']:,.2f}万元和{period_expenses['T']:,.2f}万元，"
+                      f"占发行人营业收入的比例分别为{pe_ratios['T_2']:.2f}%、{pe_ratios['T_1']:.2f}%和{pe_ratios['T']:.2f}%。\n\n"
+                      f"报告期内，发行人期间费用主要为{expense_names}，最近两年发行人期间费用较为稳定。\n\n")
+            
+            # 分项分析
+            for r in expense_rows:
+                name = r.name
+                # 占期间费用比例
+                pct_pe_t = safe_pct(r['T'], period_expenses['T'])
+                pct_pe_t1 = safe_pct(r['T_1'], period_expenses['T_1'])
+                pct_pe_t2 = safe_pct(r['T_2'], period_expenses['T_2'])
+                # 占营收比例
+                pct_rev_t = safe_pct(r['T'], row_revenue['T'])
+                pct_rev_t1 = safe_pct(r['T_1'], row_revenue['T_1'])
+                pct_rev_t2 = safe_pct(r['T_2'], row_revenue['T_2'])
+                
+                text_2 += (f"报告期内，发行人发生{name}分别为{r['T_2']:,.2f}万元、{r['T_1']:,.2f}万元和{r['T']:,.2f}万元，"
+                           f"占期间费用的比例分别为{pct_pe_t2:.2f}%、{pct_pe_t1:.2f}%和{pct_pe_t:.2f}%，"
+                           f"占营业收入的比重分别为{pct_rev_t2:.2f}%、{pct_rev_t1:.2f}%和{pct_rev_t:.2f}%。\n\n")
+            
+            st.text_area("文案 - 期间费用", value=text_2, height=400, label_visibility="collapsed")
+
+    with tab3:
+        st.info("💡 **提示**：盈利能力分析重点关注毛利率变动和费用控制能力。")
+        # 生成针对 收入、净利润、毛利率 的 AI 指令
+        # 1. 收入
+        diff_rev = row_revenue['T'] - row_revenue['T_1']
+        prompt_rev = f"【任务】分析营业收入变动原因。\n【数据】{d_t}收入为{row_revenue['T']:,.2f}万元，较上期变动{diff_rev:,.2f}万元。\n【要求】结合业务规模分析。"
+        with st.expander("📌 营业收入"): st.text_area("指令", value=prompt_rev, height=150, label_visibility="collapsed")
+        
+        # 2. 毛利率
+        prompt_margin = f"【任务】分析毛利率变动原因。\n【数据】{d_t2}、{d_t1}、{d_t}毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%、{margins['T']:.2f}%。\n【要求】结合成本和售价分析。"
+        with st.expander("📌 毛利率"): st.text_area("指令", value=prompt_margin, height=150, label_visibility="collapsed")
+
+        # 3. 净利润
+        prompt_net = f"【任务】分析净利润变动原因。\n【数据】{d_t}净利润为{row_net_profit['T']:,.2f}万元。\n【要求】结合收入、费用及非经常性损益分析。"
+        with st.expander("📌 净利润"): st.text_area("指令", value=prompt_net, height=150, label_visibility="collapsed")
+
+
 # ================= 5. 业务逻辑：财务指标分析 =================
 def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
+    # 🔥 核心修正：(显示名称, [搜索关键词], [排除关键词])
     metrics_config = [
-        ("资产负债率（%）", ["资产负债率"], ["平均"]),
+        ("资产负债率（%）", ["资产负债率"], ["平均"]), # 排除“平均资产负债率”
         ("流动比率（倍）", ["流动比率"], None),
         ("速动比率（倍）", ["速动比率"], None),
-        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"], ["倍", "比", "率", "/", "%", "全部债务", "利息"]), 
+        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"], ["倍", "比", "率", "/", "%", "全部债务", "利息"]), # 排除比率类
         ("EBITDA利息保障倍数（倍）", ["EBITDA利息保障倍数", "利息保障倍数", "EBITDA利息倍数"], None)
     ]
     
@@ -595,13 +719,16 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     data_map = {} 
     
     for display_name, search_kws, ex_kws in metrics_config:
+        # 使用不带单位的关键词去模糊搜索
         row = find_row_fuzzy(df_raw, search_kws, exclude_keywords=ex_kws)
         
         val_t, val_t1, val_t2 = 0, 0, 0
         if row.name is not None:
+            # 🔥 核心修正：应用智能单位转换
             is_ebitda = "EBITDA（万元）" in display_name
             is_ratio = "资产负债率" in display_name
             
+            # 传入 subject_name 帮助判断单位
             val_t = smart_scale_convert(row['T'], row.name, is_ebitda, is_ratio)
             val_t1 = smart_scale_convert(row['T_1'], row.name, is_ebitda, is_ratio)
             val_t2 = smart_scale_convert(row['T_2'], row.name, is_ebitda, is_ratio)
@@ -674,7 +801,7 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
 # ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 操控台")
-    analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析"])
+    analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"])
     st.markdown("---")
     
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
@@ -685,6 +812,7 @@ with st.sidebar:
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
         sheet_cash = st.text_input("现金流量表 Sheet 名", value="4.合并现金流量表")
+        sheet_profit = st.text_input("利润表 Sheet 名", value="3.合并利润表")
         sheet_ratios = st.text_input("财务指标表 Sheet 名", value="5-3主要财务指标计算-方案3（专用公司债）")
 
 # ================= 4. 主程序 =================
@@ -768,6 +896,12 @@ else:
             process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
         else: 
             st.error(f"❌ 读取失败：未找到 Sheet '{sheet_ratios}'")
+
+    elif analysis_page == "(五) 盈利能力分析":
+        df_profit, d_labels, err = get_clean_data(sheet_profit)
+        if df_profit is not None:
+            process_profitability_tab(df_profit, word_data_list, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
 
     else:
         st.info("🚧 该模块正在施工中，敬请期待后续更新...")
