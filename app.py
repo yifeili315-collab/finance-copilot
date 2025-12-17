@@ -240,7 +240,12 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.code(text, language='text')
 
     with tab3:
-        st.info(f"💡 **提示**：以下是基于 **{d_t} (最新一期)** 占比前列的科目生成的分析指令。")
+        # 🔥 核心修改：文案提示动态变化
+        if word_data_list:
+            st.info(f"💡 **提示**：已结合 Excel 数据与 **{len(word_data_list)} 个 Word 附注** 生成深度分析指令。")
+        else:
+            st.info(f"💡 **提示**：仅基于 Excel 数据生成指令（未检测到 Word 附注，已自动隐藏“附注线索”部分）。")
+            
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
@@ -260,12 +265,17 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
+            # 🔥 核心修改：先构建基础 Prompt
             prompt = f"""【任务】分析“{subject}”变动原因。
 【1. 数据趋势】
 {d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。
 【2. 变动情况】
 截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；
-截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。
+截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
+
+            # 🔥 只有当 word_data_list 不为空时，才追加后续内容
+            if word_data_list:
+                prompt += f"""
 【3. 附注线索】
 {find_context(subject, word_data_list)}
 【4. 写作要求】
@@ -313,7 +323,7 @@ if not uploaded_excel:
     ### 🚀 快速上手：
     1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
     2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/合计部分加粗/1.5磅网格边框等）。
+    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅网格边框等）。
     """)
     
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
