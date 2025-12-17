@@ -502,7 +502,6 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         fin_repay = find_row_fuzzy(df_raw, ["偿还债务支付的现金"])
         fin_interest = find_row_fuzzy(df_raw, ["分配股利、利润或偿付利息支付的现金"])
 
-        # 🟢 [修改]：只保留 st.code
         with st.container(border=True):
             st.markdown("#### 📝 1、经营活动产生的现金流量分析")
             text_op = (f"报告期内，发行人经营活动现金流入分别为{op_in_total['T_2']:,.2f}万元、{op_in_total['T_1']:,.2f}万元和{op_in_total['T']:,.2f}万元。\n\n"
@@ -610,24 +609,24 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             data_list.append([item, "", "", ""])
         else:
             # 常规科目查找
-            # 针对一些科目定义别名列表以提高命中率
             search_kws = [item]
             if item == "营业利润": search_kws = ['营业利润', '三、营业利润']
             elif item == "利润总额": search_kws = ['利润总额', '四、利润总额']
             elif item == "净利润": search_kws = ['净利润', '五、净利润']
-            elif item == "研发费用": search_kws = ['研发费用'] # 确保能找到研发
+            elif item == "研发费用": search_kws = ['研发费用']
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
+            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行
+            if item in ['销售费用', '管理费用', '研发费用', '财务费用', '其他收益', '营业外收入', '营业外支出']:
+                if val_t == 0 and val_t1 == 0 and val_t2 == 0:
+                    continue
+
             # 格式化
             f_t = f"{val_t:,.2f}" if val_t != 0 else "0.00"
             f_t1 = f"{val_t1:,.2f}" if val_t1 != 0 else "0.00"
             f_t2 = f"{val_t2:,.2f}" if val_t2 != 0 else "0.00"
             
-            # 如果是其他收益且为0，可能想留空？这里统一显示0.00保持一致，或者根据需求改
-            if item == "其他收益" and val_t == 0 and val_t1 == 0 and val_t2 == 0:
-                 f_t, f_t1, f_t2 = "", "", ""
-
             data_list.append([item, f_t, f_t1, f_t2])
 
     # 转 DataFrame
@@ -750,7 +749,6 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         st.dataframe(df_period_exp, use_container_width=True)
 
     with tab3:
-        # 🟢 [修改]：只保留 st.code
         with st.container(border=True):
             st.markdown("#### 📝 1、营业收入、营业成本和毛利率分析")
             text_1 = (f"报告期内，发行人各期的营业收入分别为{rev_t2:,.2f}万元、{rev_t1:,.2f}万元和{rev_t:,.2f}万元，"
@@ -789,13 +787,18 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         diff_rev_prev = rev_t1 - rev_t2
         diff_rev_curr = rev_t - rev_t1
         
-        # 🟢 [修改]：按要求格式化文案：增加/减少
+        # 🟢 [修改]：按要求格式化文案：增加/减少 + 增幅/降幅
         dir_rev_prev = "增加" if diff_rev_prev >= 0 else "减少"
+        label_rev_prev = "增幅" if diff_rev_prev >= 0 else "降幅"
+        pct_rev_prev = safe_pct(diff_rev_prev, rev_t2)
+        
         dir_rev_curr = "增加" if diff_rev_curr >= 0 else "减少"
+        label_rev_curr = "增幅" if diff_rev_curr >= 0 else "降幅"
+        pct_rev_curr = safe_pct(diff_rev_curr, rev_t1)
         
         rev_text = (f"报告期内，发行人营业收入分别为{rev_t2:,.2f}万元、{rev_t1:,.2f}万元和{rev_t:,.2f}万元。\n"
-                    f"{d_t1}营业收入较{d_t2}{dir_rev_prev}{abs(diff_rev_prev):,.2f}万元；\n"
-                    f"{d_t}营业收入较{d_t1}{dir_rev_curr}{abs(diff_rev_curr):,.2f}万元。\n"
+                    f"{d_t1}营业收入较{d_t2}{dir_rev_prev}{abs(diff_rev_prev):,.2f}万元，{label_rev_prev}{abs(pct_rev_prev):.2f}%；\n"
+                    f"{d_t}营业收入较{d_t1}{dir_rev_curr}{abs(diff_rev_curr):,.2f}万元，{label_rev_curr}{abs(pct_rev_curr):.2f}%。\n"
                     f"变动主要原因为：（请结合业务规模、订单量、单价等因素分析）。")
         
         with st.expander("📌 营业收入"): 
