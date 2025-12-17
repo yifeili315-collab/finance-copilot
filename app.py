@@ -334,6 +334,15 @@ with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"])
     st.markdown("---")
+    
+    # 🔥 新增：数据列模式选择
+    data_col_mode = st.radio(
+        "📊 数据列读取模式：",
+        ("🔹 标准模版 (自动读E/F/G列)", "🔧 自定义模式 (手动选3列)"),
+        help="【标准模版】：适用于公司标准底稿（第5,6,7列为万元数据）。\n【自定义模式】：适用于任意格式表，由你指定哪三列是数据。"
+    )
+    
+    st.markdown("---")
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
     uploaded_word_files = st.file_uploader("Word 附注 (可选)", type=["docx"], accept_multiple_files=True)
     header_row = st.number_input("表头所在行 (默认2)", value=2)
@@ -349,16 +358,17 @@ if not uploaded_excel:
     ### 💡 使用说明：
     1. **上传 Excel 底稿 (必须)**：请在左侧侧边栏上传。
     2. **上传 Word 附注 (可选)**：支持上传多个 Word 文件，用于生成原因分析。
-    3. **自动计算与生成**：系统会自动提取数据，生成 **数据表格**、**综述文案** 和 **AI 指令**。
+    3. **选择读取模式**：
+       - 如果是标准模版，直接用 **标准模版**。
+       - 如果是普通表格，请切换到 **自定义模式** 并手动勾选三列数据。
     4. **一键导出**：支持导出 **精排版 Word 表格**，直接粘贴到报告中。
     """)
     st.info("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
 else:
-    # 🔥 核心修改：使用 list 存储每个文件的内容
+    # Word 处理逻辑
     word_data_list = []
     word_error_msgs = []
-    
     if uploaded_word_files:
         for w in uploaded_word_files:
             content, success, err_msg = load_single_word(w) 
@@ -366,19 +376,62 @@ else:
                 word_data_list.append({'source': w.name, 'content': content})
             else:
                 word_error_msgs.append(err_msg)
-    
     if word_error_msgs:
-        for msg in word_error_msgs:
-            st.error(msg)
-    elif uploaded_word_files:
-        st.success(f"✅ 成功读取 {len(word_data_list)} 个 Word 文件！")
+        for msg in word_error_msgs: st.error(msg)
+    elif uploaded_word_files: st.success(f"✅ 成功读取 {len(word_data_list)} 个 Word 文件！")
 
+    # 🔥 核心升级：交互式数据读取逻辑
     def get_clean_data(sheet_name):
         try:
-            df = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
-            df = df.iloc[:, [0, 4, 5, 6]]
+            # 1. 先读全部数据
+            df_full = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
+            
+            # 2. 获取所有列名
+            all_cols = df_full.columns.tolist()
+            
+            # 3. 确定数据列
+            target_cols = []
+            
+            if "标准模版" in data_col_mode:
+                # 默认读取 E, F, G (索引 4, 5, 6)
+                if len(all_cols) > 6:
+                    target_cols = [all_cols[0], all_cols[4], all_cols[5], all_cols[6]]
+                else:
+                    st.error("❌ 标准模版模式下，表格列数不足 7 列，请切换到【自定义模式】。")
+                    return None, None, "列数不足"
+            else:
+                # 🔧 自定义模式：显示多选框让用户选
+                st.info("👇 **【通用模式】请在下方选择 3 列包含数据的列**（请按顺序：最新一期 -> 上期 -> 上上期）：")
+                
+                # 排除第一列（通常是科目），让用户选数据列
+                user_selected = st.multiselect(
+                    "请勾选列（需选3个）：",
+                    options=all_cols,
+                    default=all_cols[1:4] if len(all_cols) >= 4 else None,
+                    key=f"cols_{sheet_name}" # 避免Key冲突
+                )
+                
+                if len(user_selected) != 3:
+                    st.warning("⚠️ 请必须且只能选择 **3** 列数据！")
+                    st.stop() # 暂停往下执行，等待用户选好
+                
+                # 拼装：[科目列] + [用户选的3列]
+                # 注意：这里我们假设第一列永远是科目。
+                # 为了防止用户把科目列也选进去了，我们强制使用 df_full.iloc[:, 0] 作为科目列
+                df_subject = df_full.iloc[:, [0]]
+                df_data = df_full[user_selected]
+                
+                # 合并
+                df = pd.concat([df_subject, df_data], axis=1)
+            
+            if "标准模版" in data_col_mode:
+                df = df_full.iloc[:, target_cols].copy()
+
+            # 5. 提取日期标签
             orig_cols = df.columns.tolist()
             d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
+            
+            # 6. 标准化处理
             df.columns = ['科目', 'T', 'T_1', 'T_2']
             df = df.dropna(subset=['科目'])
             df['科目'] = df['科目'].astype(str).str.strip()
@@ -386,6 +439,7 @@ else:
                 df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             df.set_index('科目', inplace=True)
             return df, d_labels, None
+
         except Exception as e:
             return None, None, str(e)
 
@@ -393,10 +447,10 @@ else:
 
     if analysis_page == "(一) 资产结构分析":
         df_asset, d_labels, err = get_clean_data(sheet_asset)
+        
         if df_asset is not None:
-            # 🔥 传入的是 list
             process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
-        else:
+        elif err != "列数不足": 
             st.error(f"❌ 读取 Excel 失败：{err}\n请检查【资产表 Sheet 名】是否为：{sheet_asset}")
 
     elif analysis_page == "(二) 负债结构分析":
@@ -406,7 +460,7 @@ else:
             if not df_liab.index.str.contains(total_name).any():
                 total_name = "负债总计"
             process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
-        else:
+        elif err != "列数不足":
             st.error(f"❌ 读取 Excel 失败：{err}\n请检查【负债表 Sheet 名】是否为：{sheet_liab}")
 
     else:
