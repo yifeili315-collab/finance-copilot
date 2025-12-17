@@ -797,9 +797,7 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
             with st.expander(f"📌 {name}"):
                 st.text_area("AI 指令", value=prompt, height=200, label_visibility="collapsed")
 
-
 # ================= 3. 侧边栏 =================
-# ================= 3. 侧边栏 (已精简) =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio(
@@ -845,72 +843,6 @@ else:
     def get_clean_data(target_sheet_name):
         try:
             # 使用默认的 HEADER_ROW = 2
-            df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, 2)
-            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
-            
-            # 尝试截取前几列 (假设格式标准)
-            df = df.iloc[:, [0, 4, 5, 6]]
-            orig_cols = df.columns.tolist()
-            d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
-            df.columns = ['科目', 'T', 'T_1', 'T_2']
-            df = df.dropna(subset=['科目'])
-            df['科目'] = df['科目'].astype(str).str.strip()
-            for c in ['T', 'T_1', 'T_2']:
-                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-            df.set_index('科目', inplace=True)
-            return df, d_labels, None
-        except Exception as e: return None, None, str(e)
-
-    st.header(f"📊 {analysis_page}")
-
-    # --- 页面路由逻辑 ---
-    
-    # 定义默认 Sheet 配置 (因为高级设置已删除，这里写死默认值)
-    SHEET_CONFIG = {
-        "asset": "1.合并资产表",
-        "liab": "2.合并负债及权益表",
-        "profit": "3.合并利润表",
-        "cash": "4.合并现金流量表",
-        "ratios": "5-3主要财务指标计算-方案3（专用公司债）"
-    }
-
-    if analysis_page == "(一) 资产结构分析":
-        df_asset, d_labels, err = get_clean_data(SHEET_CONFIG["asset"])
-        if df_asset is not None: process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(二) 负债结构分析":
-        df_liab, d_labels, err = get_clean_data(SHEET_CONFIG["liab"])
-        if df_liab is not None:
-            total_name = "负债合计" 
-            if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
-            process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(三) 现金流量分析":
-        df_cash, d_labels, err = get_clean_data(SHEET_CONFIG["cash"])
-        if df_cash is not None:
-            process_cash_flow_tab(df_cash, word_data_list, d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(四) 财务指标分析":
-        # 财务指标表通常表头不固定，使用 fuzzy_load_excel 的内部逻辑
-        df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, SHEET_CONFIG["ratios"], 2)
-        if df_ratios is not None:
-            process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
-        else: 
-            st.error(f"❌ 读取失败：未找到 Sheet '{SHEET_CONFIG['ratios']}'")
-
-    elif analysis_page == "(五) 盈利能力分析":
-        df_profit, d_labels, err = get_clean_data(SHEET_CONFIG["profit"])
-        if df_profit is not None:
-            process_profitability_tab(df_profit, word_data_list, d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    # 定义数据读取通用函数 (引用默认配置)
-    def get_clean_data(target_sheet_name):
-        try:
-            # 使用默认的 HEADER_ROW
             df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, DEFAULT_HEADER_ROW)
             if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
             
@@ -930,7 +862,7 @@ else:
     st.header(f"📊 {analysis_page}")
 
     # --- 页面路由逻辑 ---
-    
+
     if analysis_page == "(一) 资产结构分析":
         df_asset, d_labels, err = get_clean_data(SHEET_CONFIG["asset"])
         if df_asset is not None: process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
@@ -963,93 +895,3 @@ else:
         if df_profit is not None:
             process_profitability_tab(df_profit, word_data_list, d_labels)
         else: st.error(f"❌ 读取失败：{err}")
-# ================= 4. 主程序 =================
-
-if not uploaded_excel:
-    st.title("📊 财务分析报告自动化助手")
-    st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
-    st.markdown("""
-    ### 🛑 使用前必读 (Requirements)
-    为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    1.  **Sheet 名称严格匹配**：
-        * 资产表 -> `1.合并资产表`
-        * 负债表 -> `2.合并负债及权益表`
-        * 现金流 -> `4.合并现金流量表`
-    2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
-    3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
-    
-    > **💡 小技巧：如何自定义日期名称？**
-    > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
-    > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
-    > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
-    ---
-    ### 🚀 快速上手：
-    1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
-    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
-    """)
-    st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
-
-else:
-    word_data_list = []
-    if uploaded_word_files:
-        for w in uploaded_word_files:
-            content, success, err_msg = load_single_word(w) 
-            if success: word_data_list.append({'source': w.name, 'content': content})
-            else: st.error(err_msg)
-    if uploaded_word_files and not word_data_list: st.stop()
-    elif uploaded_word_files: st.success(f"✅ **附注加载成功**：已读取 {len(word_data_list)} 个 Word 文件")
-
-    def get_clean_data(target_sheet_name):
-        try:
-            df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
-            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
-            df = df.iloc[:, [0, 4, 5, 6]]
-            orig_cols = df.columns.tolist()
-            d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
-            df.columns = ['科目', 'T', 'T_1', 'T_2']
-            df = df.dropna(subset=['科目'])
-            df['科目'] = df['科目'].astype(str).str.strip()
-            for c in ['T', 'T_1', 'T_2']:
-                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-            df.set_index('科目', inplace=True)
-            return df, d_labels, None
-        except Exception as e: return None, None, str(e)
-
-    st.header(f"📊 {analysis_page}")
-
-    if analysis_page == "(一) 资产结构分析":
-        df_asset, d_labels, err = get_clean_data(sheet_asset)
-        if df_asset is not None: process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(二) 负债结构分析":
-        df_liab, d_labels, err = get_clean_data(sheet_liab)
-        if df_liab is not None:
-            total_name = "负债合计" 
-            if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
-            process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(三) 现金流量分析":
-        df_cash, d_labels, err = get_clean_data(sheet_cash)
-        if df_cash is not None:
-            process_cash_flow_tab(df_cash, word_data_list, d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    elif analysis_page == "(四) 财务指标分析":
-        # 🔥 使用智能读取器，不依赖 get_clean_data
-        df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, sheet_ratios, header_row) # 这里 header_row 其实被忽略了
-        if df_ratios is not None:
-            process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
-        else: 
-            st.error(f"❌ 读取失败：未找到 Sheet '{sheet_ratios}'")
-
-    elif analysis_page == "(五) 盈利能力分析":
-        df_profit, d_labels, err = get_clean_data(sheet_profit)
-        if df_profit is not None:
-            process_profitability_tab(df_profit, word_data_list, d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
-
-    else:
-        st.info("🚧 该模块正在施工中，敬请期待后续更新...")
