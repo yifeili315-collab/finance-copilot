@@ -805,16 +805,6 @@ with st.sidebar:
     st.markdown("---")
     
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
-    uploaded_word_files = st.file_uploader("Word 附注 (可选)", type=["docx"], accept_multiple_files=True)
-    
-    with st.expander("⚙️ 高级设置 (Sheet名称/表头行)"):
-        header_row = st.number_input("表头所在行 (默认2，即第3行)", value=2, min_value=0)
-        sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
-        sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
-        sheet_cash = st.text_input("现金流量表 Sheet 名", value="4.合并现金流量表")
-        sheet_profit = st.text_input("利润表 Sheet 名", value="3.合并利润表")
-        sheet_ratios = st.text_input("财务指标表 Sheet 名", value="5-3主要财务指标计算-方案3（专用公司债）")
-
 # ================= 4. 主程序 =================
 
 if not uploaded_excel:
