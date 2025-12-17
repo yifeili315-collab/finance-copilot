@@ -309,7 +309,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         if total != 0: df[f'占比_{period}'] = df[period] / total
         else: df[f'占比_{period}'] = 0.0
 
-    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
+    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "📝 变动分析文案"])
 
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
@@ -377,12 +377,11 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 
     with tab3:
         latest_date_label = d_labels[0]
-        st.info(f"💡 **提示**：以下科目占比均基于 **{latest_date_label} (最新一期)** 的数据计算。")
-        if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
-        else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令。")
+        st.info(f"💡 **提示**：已根据数据生成科目变动分析文案草稿。")
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
         denom_text = "总资产" if analysis_name == "资产" else f"{analysis_name}总额"
+        
         for subject in major_subjects:
             row = df.loc[subject]
             diff_prev = row['T_1'] - row['T_2']
@@ -393,10 +392,21 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             pct_curr = safe_pct(diff_curr, row['T_1'])
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
-            prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
-            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
+            
+            # 生成变动分析文案
+            analysis_text = (f"报告期各期末，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，"
+                           f"占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n"
+                           f"{d_t1}末，发行人{subject}较{d_t2}末{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；"
+                           f"{d_t}末，发行人{subject}较{d_t1}末{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。\n\n"
+                           f"变动主要原因为：（请在此处补充具体的业务原因，例如：业务规模扩大/缩减、新增/偿还款项等）。")
+            
+            # 如果有附注上下文，展示在下方供参考
+            ctx = find_context(subject, word_data_list)
+            if ctx:
+                analysis_text += f"\n\n【参考附注信息】\n{ctx}"
+
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
-                st.text_area(label="AI 指令", value=prompt, height=250, key=f"area_{subject}", label_visibility="collapsed")
+                st.text_area(label="变动分析文案", value=analysis_text, height=200, key=f"area_{subject}", label_visibility="collapsed")
 
 # ================= 4. 业务逻辑：现金流量 =================
 def calculate_cash_flow_percentages(df_raw, d_labels):
@@ -443,7 +453,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
 
     df_pct = calculate_cash_flow_percentages(df_raw, d_labels)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 摘要数据", "📊 占比分析", "📝 综述文案", "🤖 变动及"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 摘要数据", "📊 占比分析", "📝 综述文案", "📝 变动分析文案"])
     
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
@@ -495,46 +505,44 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
                      f"发行人收到其他与经营活动有关的现金主要包括【】。\n\n")
             text_op += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。\n\n"
-                     f"报告期内，发行人经营活动现金流出主要来源于【】。"
-                     f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
-                     f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。\n\n"
-                     f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
-                     f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
-                     f"支付其他与经营活动有关的现金包括：【】。\n\n")
+                      f"报告期内，发行人经营活动现金流出主要来源于【】。"
+                      f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
+                      f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。\n\n"
+                      f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
+                      f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
+                      f"支付其他与经营活动有关的现金包括：【】。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
-                     f"主要系【】所致。")
+                      f"主要系【】所致。")
             st.text_area("文案内容", value=text_op, height=350, label_visibility="collapsed", key="txt_op")
 
         # Box 2
         with st.container(border=True):
             st.markdown("#### 📝 2、投资活动产生的现金流量分析")
             text_inv = (f"报告期内，发行人投资活动产生的现金流量净额分别为{inv_net['T_2']:,.2f}万元、{inv_net['T_1']:,.2f}万元和{inv_net['T']:,.2f}万元。\n\n"
-                     f"投资活动现金流入分别为{inv_in_total['T_2']:,.2f}万元、{inv_in_total['T_1']:,.2f}万元及{inv_in_total['T']:,.2f}万元；"
-                     f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
-                     f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
-                     f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
-                     f"发行人投资活动现金流量净额【】，主要是发行人【】所致。")
+                      f"投资活动现金流入分别为{inv_in_total['T_2']:,.2f}万元、{inv_in_total['T_1']:,.2f}万元及{inv_in_total['T']:,.2f}万元；"
+                      f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
+                      f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
+                      f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
+                      f"发行人投资活动现金流量净额【】，主要是发行人【】所致。")
             st.text_area("文案内容", value=text_inv, height=250, label_visibility="collapsed", key="txt_inv")
 
         # Box 3
         with st.container(border=True):
             st.markdown("#### 📝 3、筹资活动产生的现金流量分析")
             text_fin = (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。\n\n"
-                     f"报告期内筹资活动产生的现金流量净额【】，主要系【】所致。\n\n")
+                      f"报告期内筹资活动产生的现金流量净额【】，主要系【】所致。\n\n")
             text_fin += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由【】构成。"
-                     f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
-                     f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
-                     f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
+                       f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
+                       f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
+                       f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
             text_fin += (f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
-                     f"发行人筹资活动现金流出主要由【】构成。"
-                     f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
-                     f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
+                       f"发行人筹资活动现金流出主要由【】构成。"
+                       f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
+                       f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
             st.text_area("文案内容", value=text_fin, height=350, label_visibility="collapsed", key="txt_fin")
 
     with tab4:
-        st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
-        if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
-        else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令。")
+        st.info("💡 **提示**：已自动生成净现金流量变动分析文案草稿。")
         target_subjects = ["经营活动产生的现金流量净额", "投资活动产生的现金流量净额", "筹资活动产生的现金流量净额"]
         for subject in target_subjects:
             row = find_row_fuzzy(df_raw, [subject])
@@ -543,10 +551,15 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             diff_curr = row['T'] - row['T_1']
             dir_prev = "增加" if diff_prev >= 0 else "减少"
             dir_curr = "增加" if diff_curr >= 0 else "减少"
-            prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t1}，较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元；\n截至{d_t}，较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元。"""
-            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。"""
+            
+            # 生成变动分析文案
+            cf_text = (f"报告期各期，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n"
+                     f"{d_t1}，发行人{subject}较{d_t2}净{dir_prev}{abs(diff_prev):,.2f}万元；\n"
+                     f"{d_t}，发行人{subject}较{d_t1}净{dir_curr}{abs(diff_curr):,.2f}万元。\n\n"
+                     f"变动主要原因为：（请在此处补充具体的业务或资金变动原因）。")
+            
             with st.expander(f"📌 {subject}"):
-                st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
+                st.text_area(label="变动分析文案", value=cf_text, height=200, key=f"cf_prompt_{subject}", label_visibility="collapsed")
 
 # ================= 5. 业务逻辑：盈利能力分析 (NEW!) =================
 def process_profitability_tab(df_raw, word_data_list, d_labels):
@@ -588,7 +601,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     fixed_1 = [row_revenue, row_cost]
     for r in fixed_1:
         data_list.append([r.name if r.name else "未找到", r['T'], r['T_1'], r['T_2']])
-    
+        
     # 费用项目
     for r in expense_rows:
         data_list.append([r.name, r['T'], r['T_1'], r['T_2']])
@@ -638,7 +651,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         pe_ratios[col] = period_expenses[col] / rev * 100 if rev != 0 else 0.0
 
     # UI 展示
-    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
+    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "📝 变动分析文案"])
 
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
@@ -686,20 +699,27 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             st.text_area("文案 - 期间费用", value=text_2, height=400, label_visibility="collapsed")
 
     with tab3:
-        st.info("💡 **提示**：盈利能力分析重点关注毛利率变动和费用控制能力。")
-        # 生成针对 收入、净利润、毛利率 的 AI 指令
-        # 1. 收入
-        diff_rev = row_revenue['T'] - row_revenue['T_1']
-        prompt_rev = f"【任务】分析营业收入变动原因。\n【数据】{d_t}收入为{row_revenue['T']:,.2f}万元，较上期变动{diff_rev:,.2f}万元。\n【要求】结合业务规模分析。"
-        with st.expander("📌 营业收入"): st.text_area("指令", value=prompt_rev, height=150, label_visibility="collapsed")
+        st.info("💡 **提示**：已自动生成关键盈利指标变动分析文案草稿。")
+        # 1. 收入分析
+        diff_rev_prev = row_revenue['T_1'] - row_revenue['T_2']
+        diff_rev_curr = row_revenue['T'] - row_revenue['T_1']
+        rev_text = (f"报告期各期，发行人营业收入分别为{row_revenue['T_2']:,.2f}万元、{row_revenue['T_1']:,.2f}万元和{row_revenue['T']:,.2f}万元。\n"
+                    f"{d_t1}营业收入较{d_t2}变动{diff_rev_prev:,.2f}万元；\n"
+                    f"{d_t}营业收入较{d_t1}变动{diff_rev_curr:,.2f}万元。\n"
+                    f"变动主要原因为：（请结合业务规模、订单量、单价等因素分析）。")
+        with st.expander("📌 营业收入"): st.text_area("文案", value=rev_text, height=150, label_visibility="collapsed")
         
-        # 2. 毛利率
-        prompt_margin = f"【任务】分析毛利率变动原因。\n【数据】{d_t2}、{d_t1}、{d_t}毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%、{margins['T']:.2f}%。\n【要求】结合成本和售价分析。"
-        with st.expander("📌 毛利率"): st.text_area("指令", value=prompt_margin, height=150, label_visibility="collapsed")
+        # 2. 毛利率分析
+        margin_text = (f"报告期各期，发行人毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%、{margins['T']:.2f}%。\n"
+                       f"发行人毛利率变动主要系：（请结合成本波动、产品定价策略等因素分析）。")
+        with st.expander("📌 毛利率"): st.text_area("文案", value=margin_text, height=150, label_visibility="collapsed")
 
-        # 3. 净利润
-        prompt_net = f"【任务】分析净利润变动原因。\n【数据】{d_t}净利润为{row_net_profit['T']:,.2f}万元。\n【要求】结合收入、费用及非经常性损益分析。"
-        with st.expander("📌 净利润"): st.text_area("指令", value=prompt_net, height=150, label_visibility="collapsed")
+        # 3. 净利润分析
+        diff_net_prev = row_net_profit['T_1'] - row_net_profit['T_2']
+        diff_net_curr = row_net_profit['T'] - row_net_profit['T_1']
+        net_text = (f"报告期各期，发行人净利润分别为{row_net_profit['T_2']:,.2f}万元、{row_net_profit['T_1']:,.2f}万元和{row_net_profit['T']:,.2f}万元。\n"
+                    f"净利润变动趋势与利润总额变动趋势一致，变动原因主要为：（请补充非经常性损益或税务影响等原因）。")
+        with st.expander("📌 净利润"): st.text_area("文案", value=net_text, height=150, label_visibility="collapsed")
 
 
 # ================= 5. 业务逻辑：财务指标分析 =================
@@ -749,7 +769,7 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     df_display = pd.DataFrame(data_list, columns=["项目", d_t, d_t1, d_t2])
     df_display.set_index("项目", inplace=True)
 
-    tab1, tab2, tab3 = st.tabs(["📋 指标数据", "📝 综述文案", "🤖 AI 分析指令"])
+    tab1, tab2, tab3 = st.tabs(["📋 指标数据", "📝 综述文案", "📝 变动分析文案"])
 
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
@@ -786,16 +806,24 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
             st.text_area("文案内容", value=text, height=400, label_visibility="collapsed", help="Ctrl+A 全选")
 
     with tab3:
-        st.info("💡 **提示**：财务指标的变动通常需要结合资产负债结构和盈利能力进行综合分析。")
+        st.info("💡 **提示**：已自动生成关键指标变动分析文案草稿。")
         prompts = [
             ("资产负债率", alr, "分析偿债风险变化"),
             ("流动比率", cr, "分析短期偿债能力"),
             ("EBITDA", ebitda, "分析盈利及获现能力")
         ]
         for name, data, task in prompts:
-            prompt = f"""【任务】{task}：{name}\n\n【数据表现】\n{d_t2}、{d_t1}及{d_t}，{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n\n【分析要求】\n结合企业经营情况，分析指标变动的原因。"""
+            # 根据趋势判断描述
+            trend_text = ""
+            if data['T'] > data['T_1']: trend_text = "有所上升"
+            elif data['T'] < data['T_1']: trend_text = "有所下降"
+            else: trend_text = "保持稳定"
+            
+            analysis_text = (f"报告期各期，发行人{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n"
+                           f"报告期内，发行人{name}{trend_text}，主要系：（请结合资产负债结构或盈利能力分析）。")
+            
             with st.expander(f"📌 {name}"):
-                st.text_area("AI 指令", value=prompt, height=200, label_visibility="collapsed")
+                st.text_area("文案", value=analysis_text, height=150, label_visibility="collapsed")
 
 # ================= 3. 侧边栏 =================
 with st.sidebar:
@@ -830,7 +858,7 @@ if not uploaded_excel:
     st.markdown("""
     ### 🚀 快速上手：
     1.  **左侧上传**：请在左侧上传 Excel 底稿文件。
-    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
+    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / 变动分析文案**。
     3.  **一键导出**：支持导出 **精排版 Word 表格**。
     """)
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
