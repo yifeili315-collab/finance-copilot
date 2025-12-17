@@ -375,6 +375,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
             
+            # 🟢 [修改]：直接使用 markdown 展示文案 + 下方直接展示代码框（无折叠）
             with st.container(border=True):
                 st.markdown(f"#### 📝 {analysis_name}综述文案")
                 st.markdown(text)
@@ -676,6 +677,8 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
 
     # 🟢 [新增]：构建期间费用分析表格数据
     period_exp_data = []
+    sum_t, sum_t1, sum_t2 = 0, 0, 0 # 用于计算合计
+
     for r in all_expense_rows:
         row_dat = [r.name]
         
@@ -683,18 +686,35 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         val_t = r['T']
         pct_t = val_t / rev_t * 100 if rev_t else 0
         row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}%"])
+        sum_t += val_t
         
         # T-1
         val_t1 = r['T_1']
         pct_t1 = val_t1 / rev_t1 * 100 if rev_t1 else 0
         row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}%"])
+        sum_t1 += val_t1
 
         # T-2
         val_t2 = r['T_2']
         pct_t2 = val_t2 / rev_t2 * 100 if rev_t2 else 0
         row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}%"])
+        sum_t2 += val_t2
         
         period_exp_data.append(row_dat)
+    
+    # 🟢 [新增]：添加期间费用合计行
+    total_row = ["期间费用合计"]
+    # T
+    total_pct_t = sum_t / rev_t * 100 if rev_t else 0
+    total_row.extend([f"{sum_t:,.2f}", f"{total_pct_t:.2f}%"])
+    # T-1
+    total_pct_t1 = sum_t1 / rev_t1 * 100 if rev_t1 else 0
+    total_row.extend([f"{sum_t1:,.2f}", f"{total_pct_t1:.2f}%"])
+    # T-2
+    total_pct_t2 = sum_t2 / rev_t2 * 100 if rev_t2 else 0
+    total_row.extend([f"{sum_t2:,.2f}", f"{total_pct_t2:.2f}%"])
+    
+    period_exp_data.append(total_row)
     
     # 🟢 [修复]：使用带年份的列名，避免 Duplicate column names 错误
     pe_cols = ["项目", 
