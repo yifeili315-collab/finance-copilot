@@ -138,7 +138,6 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=2):
             for actual_name in all_sheet_names:
                 if actual_name.replace(" ", "") == clean_target:
                     target_sheet = actual_name
-                    # st.toast(f"⚠️ 自动修正 Sheet 名为：'{actual_name}'")
                     break
         
         if target_sheet is None:
@@ -344,19 +343,18 @@ def process_analysis_tab(df_raw, total_col_name, analysis_name, d_labels):
         st.info(f"💡 **提示**：以下科目占比均基于 **{latest_date_label} (最新一期)** 的数据计算。")
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
-        denom_text = "总资产" if analysis_name == "资产" else f"{analysis_name}总额"
         for subject in major_subjects:
             row = df.loc[subject]
             diff_prev = row['T_1'] - row['T_2']
             pct_prev = safe_pct(diff_prev, row['T_2'])
             dir_prev = "增加" if diff_prev >= 0 else "减少"
-            label_prev = "增幅" if diff_prev >= 0 else "降幅"
             diff_curr = row['T'] - row['T_1']
             pct_curr = safe_pct(diff_curr, row['T_1'])
             dir_curr = "增加" if diff_curr >= 0 else "减少"
+            label_prev = "增幅" if diff_prev >= 0 else "降幅"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
-            prompt = f"""【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
+            prompt = f"""【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
             
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.code(prompt, language='text')
@@ -589,7 +587,13 @@ def process_financial_ratios_tab(df_raw, d_labels):
         ]
         for name, data in prompts:
             # 🔥 精简版 AI 指令
-            prompt = f"""【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n\n【2. 变动情况】\n结合企业经营情况，分析指标变动的原因。"""
+            diff_prev = data['T_1'] - data['T_2']
+            diff_curr = data['T'] - data['T_1']
+            dir_prev = "增加" if diff_prev >= 0 else "减少"
+            dir_curr = "增加" if diff_curr >= 0 else "减少"
+            
+            prompt = f"""【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n\n【2. 变动情况】\n截至{d_t1}，{name}较{d_t2}{dir_prev}{abs(diff_prev):.2f}；\n截至{d_t}，{name}较{d_t1}{dir_curr}{abs(diff_curr):.2f}。"""
+            
             with st.expander(f"📌 {name}"):
                 st.code(prompt, language='text')
 
@@ -718,45 +722,37 @@ def process_profitability_tab(df_raw, d_labels):
         dir_rev = "增加" if diff_rev >= 0 else "减少"
         label_rev = "增幅" if diff_rev >= 0 else "降幅"
         
-        # 🔥 精简版 AI 指令 (只包含数据趋势 + 变动情况)
+        # 🔥 精简版 AI 指令
         prompt_rev = f"【1. 数据趋势】\n{d_t}收入为{row_revenue['T']:,.2f}万元，较上期变动{diff_rev:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t}，发行人营业收入较{d_t1}{dir_rev}{abs(diff_rev):,.2f}万元，{label_rev}{abs(pct_rev_chg):.2f}%。"
         with st.expander("📌 营业收入"): st.code(prompt_rev, language='text')
         
-        prompt_margin = f"【1. 数据趋势】\n{d_t2}、{d_t1}、{d_t}毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%、{margins['T']:.2f}%。\n\n【2. 变动情况】\n结合成本和售价分析。"
-        with st.expander("📌 毛利率"): st.code(prompt_margin, language='text')
+        diff_net = row_net_profit['T'] - row_net_profit['T_1']
+        pct_net_chg = safe_pct(diff_net, row_net_profit['T_1'])
+        dir_net = "增加" if diff_net >= 0 else "减少"
+        label_net = "增幅" if diff_net >= 0 else "降幅"
 
-        prompt_net = f"【1. 数据趋势】\n{d_t}净利润为{row_net_profit['T']:,.2f}万元。\n\n【2. 变动情况】\n结合收入、费用及非经常性损益分析。"
+        prompt_net = f"【1. 数据趋势】\n{d_t}净利润为{row_net_profit['T']:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t}，发行人净利润较{d_t1}{dir_net}{abs(diff_net):,.2f}万元，{label_net}{abs(pct_net_chg):.2f}%。"
         with st.expander("📌 净利润"): st.code(prompt_net, language='text')
 
 
 # ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 智能财务助手")
-    page_mode = st.radio("导航", ["📖 使用前必读", "🚀 财务分析生成"])
-    st.markdown("---")
-
-if page_mode == "📖 使用前必读":
-    st.title("📊 财务分析报告自动化助手")
-    st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
-    st.markdown("""
-    ### 🛑 使用前必读 (Requirements)
-    为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    1.  **Sheet 名称严格匹配**：
+    with st.expander("📖 使用前必读", expanded=True):
+        st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
+        st.markdown("""
+        **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
         * 现金流 -> `4.合并现金流量表`
         * 利润表 -> `3.合并利润表`
         * 财务指标 -> `5-3主要财务指标计算-方案3（专用公司债）`
-    2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
-    3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
+        
+        > **💡 小技巧：自定义日期名称**
+        > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
+        """)
     
-    > **💡 小技巧：如何自定义日期名称？**
-    > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
-    > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
-    > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
-    """)
-
-elif page_mode == "🚀 财务分析生成":
+    st.markdown("---")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"])
     st.markdown("---")
     
@@ -770,55 +766,59 @@ elif page_mode == "🚀 财务分析生成":
     sheet_profit = "3.合并利润表"
     sheet_ratios = "5-3主要财务指标计算-方案3（专用公司债）"
 
-    if not uploaded_excel:
-        st.warning("👈 请先在上方上传 Excel 底稿文件。")
-    else:
-        def get_clean_data(target_sheet_name):
-            try:
-                df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
-                if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
-                df = df.iloc[:, [0, 4, 5, 6]]
-                orig_cols = df.columns.tolist()
-                d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
-                df.columns = ['科目', 'T', 'T_1', 'T_2']
-                df = df.dropna(subset=['科目'])
-                df['科目'] = df['科目'].astype(str).str.strip()
-                for c in ['T', 'T_1', 'T_2']:
-                    df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-                df.set_index('科目', inplace=True)
-                return df, d_labels, None
-            except Exception as e: return None, None, str(e)
+# ================= 4. 主程序 =================
 
-        st.header(f"📊 {analysis_page}")
+if not uploaded_excel:
+    st.title("🚀 欢迎使用财务分析报告生成器")
+    st.warning("👈 请先在左侧侧边栏上传 Excel 底稿文件以开始。")
 
-        if analysis_page == "(一) 资产结构分析":
-            df_asset, d_labels, err = get_clean_data(sheet_asset)
-            if df_asset is not None: process_analysis_tab(df_asset, "资产总计", "资产", d_labels)
-            else: st.error(f"❌ 读取失败：{err}")
+else:
+    def get_clean_data(target_sheet_name):
+        try:
+            df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
+            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
+            df = df.iloc[:, [0, 4, 5, 6]]
+            orig_cols = df.columns.tolist()
+            d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
+            df.columns = ['科目', 'T', 'T_1', 'T_2']
+            df = df.dropna(subset=['科目'])
+            df['科目'] = df['科目'].astype(str).str.strip()
+            for c in ['T', 'T_1', 'T_2']:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            df.set_index('科目', inplace=True)
+            return df, d_labels, None
+        except Exception as e: return None, None, str(e)
 
-        elif analysis_page == "(二) 负债结构分析":
-            df_liab, d_labels, err = get_clean_data(sheet_liab)
-            if df_liab is not None:
-                total_name = "负债合计" 
-                if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
-                process_analysis_tab(df_liab, total_name, "负债", d_labels)
-            else: st.error(f"❌ 读取失败：{err}")
+    st.header(f"📊 {analysis_page}")
 
-        elif analysis_page == "(三) 现金流量分析":
-            df_cash, d_labels, err = get_clean_data(sheet_cash)
-            if df_cash is not None:
-                process_cash_flow_tab(df_cash, d_labels)
-            else: st.error(f"❌ 读取失败：{err}")
+    if analysis_page == "(一) 资产结构分析":
+        df_asset, d_labels, err = get_clean_data(sheet_asset)
+        if df_asset is not None: process_analysis_tab(df_asset, "资产总计", "资产", d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
 
-        elif analysis_page == "(四) 财务指标分析":
-            df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, sheet_ratios, header_row) 
-            if df_ratios is not None:
-                process_financial_ratios_tab(df_ratios, d_labels)
-            else: 
-                st.error(f"❌ 读取失败：未找到 Sheet '{sheet_ratios}'")
+    elif analysis_page == "(二) 负债结构分析":
+        df_liab, d_labels, err = get_clean_data(sheet_liab)
+        if df_liab is not None:
+            total_name = "负债合计" 
+            if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
+            process_analysis_tab(df_liab, total_name, "负债", d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
 
-        elif analysis_page == "(五) 盈利能力分析":
-            df_profit, d_labels, err = get_clean_data(sheet_profit)
-            if df_profit is not None:
-                process_profitability_tab(df_profit, d_labels)
-            else: st.error(f"❌ 读取失败：{err}")
+    elif analysis_page == "(三) 现金流量分析":
+        df_cash, d_labels, err = get_clean_data(sheet_cash)
+        if df_cash is not None:
+            process_cash_flow_tab(df_cash, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
+
+    elif analysis_page == "(四) 财务指标分析":
+        df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, sheet_ratios, header_row) 
+        if df_ratios is not None:
+            process_financial_ratios_tab(df_ratios, d_labels)
+        else: 
+            st.error(f"❌ 读取失败：未找到 Sheet '{sheet_ratios}'")
+
+    elif analysis_page == "(五) 盈利能力分析":
+        df_profit, d_labels, err = get_clean_data(sheet_profit)
+        if df_profit is not None:
+            process_profitability_tab(df_profit, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
