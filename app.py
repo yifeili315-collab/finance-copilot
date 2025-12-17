@@ -169,9 +169,21 @@ def safe_pct(num, denom):
 
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
+        if analysis_name == "负债":
+             total_idx = df_raw.index[df_raw.index.str.contains(total_col_name)].tolist()
+             if total_idx:
+                 idx_pos = df_raw.index.get_loc(total_idx[0])
+                 if isinstance(idx_pos, slice):
+                     idx_pos = idx_pos.stop - 1
+                 elif hasattr(idx_pos, '__iter__'): 
+                     idx_pos = idx_pos[0]
+                 
+                 if isinstance(idx_pos, int):
+                    df_raw = df_raw.iloc[:idx_pos + 1]
+        
         total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
-    except:
-        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。")
+    except Exception as e:
+        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。错误信息: {e}")
         return
 
     df = df_raw.copy()
@@ -213,6 +225,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
     with tab2:
         st.markdown("👇 **直接复制：**")
         top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
+        
         text = ""
         try:
             if analysis_name == "资产":
@@ -227,20 +240,43 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             elif analysis_name == "负债":
                 curr_row = df_raw[df_raw.index.str.contains('流动负债合计')].iloc[0]
                 non_curr_row = df_raw[df_raw.index.str.contains('非流动负债合计')].iloc[0]
-                text = (f"报告期内，发行人负债总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
-                        f"其中，流动负债金额分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
-                        f"占负债总额的比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%；\n\n"
-                        f"非流动负债金额分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
-                        f"占负债总额的比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。\n\n"
-                        f"从结构来看，主要构成项目包括：**{'、'.join(top_5)}** 等。")
+                
+                diff_prev = total_row['T_1'] - total_row['T_2']
+                pct_prev = safe_pct(diff_prev, total_row['T_2'])
+                dir_prev = "增加" if diff_prev >= 0 else "减少"
+                label_prev = "增幅" if diff_prev >= 0 else "降幅"
+                
+                diff_curr = total_row['T'] - total_row['T_1']
+                pct_curr = safe_pct(diff_curr, total_row['T_1'])
+                dir_curr = "增加" if diff_curr >= 0 else "减少"
+                label_curr = "增幅" if diff_curr >= 0 else "降幅"
+                
+                trend_desc = "增长" if diff_curr >= 0 else "下降"
+
+                text = (
+                    f"报告期内，发行人负债总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元，"
+                    f"{d_labels[1]}较{d_labels[2]}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%，"
+                    f"{d_labels[0]}发行人负债较{d_labels[1]}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"
+                    f"报告期内发行人的负债规模呈现{trend_desc}态势，主要原因为发行人（用户自行分析）。\n\n"
+                    
+                    f"从负债结构来看，报告期内，流动负债分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
+                    f"占负债总额比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、"
+                    f"{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和"
+                    f"{safe_pct(curr_row['T'], total_row['T']):.2f}%，"
+                    f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
+                    
+                    f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
+                    f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、"
+                    f"{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和"
+                    f"{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。"
+                )
             else:
                 text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
-        except:
-             text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
+        except Exception as e:
+             text = f"⚠️ 生成文案时出错: {e}。请检查表格中是否包含【流动负债合计】、【非流动负债合计】等关键行。"
         st.code(text, language='text')
 
     with tab3:
-        # 🔥 核心修改：文案提示动态变化
         if word_data_list:
             st.info(f"💡 **提示**：已结合 Excel 数据与 **{len(word_data_list)} 个 Word 附注** 生成深度分析指令。")
         else:
@@ -265,15 +301,13 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
-            # 🔥 核心修改：先构建基础 Prompt
             prompt = f"""【任务】分析“{subject}”变动原因。
 【1. 数据趋势】
 {d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。
 【2. 变动情况】
-截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；
+截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%。
 截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
 
-            # 🔥 只有当 word_data_list 不为空时，才追加后续内容
             if word_data_list:
                 prompt += f"""
 【3. 附注线索】
@@ -284,7 +318,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
                 st.code(prompt, language='text')
 
-# ================= 3. 侧边栏 =================
+# ================= 3. Sidebar =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"])
@@ -298,7 +332,7 @@ with st.sidebar:
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
 
-# ================= 4. 主程序 =================
+# ================= 4. Main Program =================
 
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
@@ -323,7 +357,7 @@ if not uploaded_excel:
     ### 🚀 快速上手：
     1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
     2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅网格边框等）。
+    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
     """)
     
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
