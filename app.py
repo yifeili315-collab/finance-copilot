@@ -188,40 +188,23 @@ def find_row_fuzzy(df, keywords):
 
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
-        # 🔥 核心修正：负债结构分析的精准切片
+        # 1. 负债表切片逻辑
         if analysis_name == "负债":
-             # 1. 使用正则表达式精准定位“负债合计”
-             # ^ 表示开始, $ 表示结束, \s* 表示允许有空格
-             # 这样就能排除 "流动负债合计" (前面有字)
-             # 我们在 index 中搜索匹配这个模式的行
-             
-             # 先把 index 转成 string
              index_series = df_raw.index.astype(str)
-             
-             # 查找完全匹配 "负债合计" (忽略前后空格) 的行
-             # 如果你的表里写的是 "负 债 合 计"，我们需要先去除空格再匹配，或者用宽容正则
-             
-             # 方案：先创建一个没有空格的 index 映射
              clean_index = index_series.str.replace(r'\s+', '', regex=True)
-             clean_target = total_col_name.replace(" ", "") # "负债合计"
+             clean_target = total_col_name.replace(" ", "")
              
              match_mask = (clean_index == clean_target)
              
              if match_mask.any():
-                 # 获取匹配行的 Label
                  target_label = df_raw.index[match_mask][0]
-                 
-                 # 获取行号
                  idx_pos = df_raw.index.get_loc(target_label)
                  
-                 # 如果有重复(比如母公司/合并)，通常取最后一个（或者看需求）
-                 # 这里假设我们已经读了合并表，取最后一个通常比较安全（因为总计在最下）
                  if isinstance(idx_pos, slice):
                      idx_pos = idx_pos.stop - 1
                  elif hasattr(idx_pos, '__iter__'): 
                      idx_pos = idx_pos[-1]
                  
-                 # 🔥 执行切片：只保留到“负债合计”这一行
                  if isinstance(idx_pos, int):
                     df_raw = df_raw.iloc[:idx_pos + 1]
              else:
@@ -245,7 +228,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
 
-    # 4. 显示明细数据 (现在是切片后的干净表格了！)
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown(f"### {analysis_name}结构明细")
@@ -328,10 +310,15 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.code(text, language='text')
 
     with tab3:
+        # 🔥 核心修改：明确提示占比基于哪一期
+        latest_date_label = d_labels[0] # 获取最新一期的日期标签
+        
+        st.info(f"💡 **提示**：以下科目占比均基于 **{latest_date_label} (最新一期)** 的数据计算。")
+        
         if word_data_list:
-            st.info(f"💡 **提示**：已结合 Excel 数据与 **{len(word_data_list)} 个 Word 附注** 生成深度分析指令。")
+            st.success(f"✅ 已结合 **{len(word_data_list)} 个 Word 附注** 生成深度分析指令。")
         else:
-            st.info(f"💡 **提示**：仅基于 Excel 数据生成指令（未检测到 Word 附注，已自动隐藏“附注线索”部分）。")
+            st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令（已自动隐藏“附注线索”部分）。")
             
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         exclude_list = ['合计', '总计', '总额']
@@ -366,7 +353,8 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 【4. 写作要求】
 结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
             
-            with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
+            # 🔥 修改折叠标题，加入日期说明
+            with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.code(prompt, language='text')
 
 # ================= 3. 侧边栏 =================
