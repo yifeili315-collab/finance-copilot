@@ -167,53 +167,74 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
-# 🔥 新增：模糊查找行函数（忽略空格，兼容别名）
+# 模糊查找函数
 def find_row_fuzzy(df, keywords):
-    """在 DataFrame 索引中查找包含关键词的行（忽略空格）"""
     if isinstance(keywords, str): keywords = [keywords]
-    
-    # 创建一个去除所有空格的临时索引用于搜索
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
     
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
-        # 查找
-        mask = clean_index.str.contains(clean_kw, case=False, na=False)
+        mask = clean_index == clean_kw 
         if mask.any():
-            # 返回匹配到的第一行
             return df.loc[df.index[mask][0]]
             
-    # 如果都找不到，抛出特定异常
+    for kw in keywords:
+        clean_kw = kw.replace(" ", "")
+        mask = clean_index.str.contains(clean_kw, case=False, na=False)
+        if mask.any():
+            return df.loc[df.index[mask][0]]
+
     raise ValueError(f"未找到包含 {' / '.join(keywords)} 的行")
 
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
-        # 1. 尝试定位总计行（使用模糊匹配）
-        try:
-            total_row = find_row_fuzzy(df_raw, [total_col_name, total_col_name.replace("合计", "总计")])
-        except ValueError:
-             st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行。")
-             return
-
-        # 2. 负债表切片逻辑：找到总计行，切掉下面的权益部分
+        # 🔥 核心修正：负债结构分析的精准切片
         if analysis_name == "负债":
-             # 再次定位 index 位置用于切片
-             # find_row_fuzzy 返回的是 Series，我们需要它的 name (即索引值)
-             total_row_name = total_row.name
-             idx_pos = df_raw.index.get_loc(total_row_name)
+             # 1. 使用正则表达式精准定位“负债合计”
+             # ^ 表示开始, $ 表示结束, \s* 表示允许有空格
+             # 这样就能排除 "流动负债合计" (前面有字)
+             # 我们在 index 中搜索匹配这个模式的行
              
-             if isinstance(idx_pos, slice):
-                 idx_pos = idx_pos.stop - 1
-             elif hasattr(idx_pos, '__iter__'): 
-                 idx_pos = idx_pos[0]
+             # 先把 index 转成 string
+             index_series = df_raw.index.astype(str)
              
-             if isinstance(idx_pos, int):
-                df_raw = df_raw.iloc[:idx_pos + 1]
+             # 查找完全匹配 "负债合计" (忽略前后空格) 的行
+             # 如果你的表里写的是 "负 债 合 计"，我们需要先去除空格再匹配，或者用宽容正则
+             
+             # 方案：先创建一个没有空格的 index 映射
+             clean_index = index_series.str.replace(r'\s+', '', regex=True)
+             clean_target = total_col_name.replace(" ", "") # "负债合计"
+             
+             match_mask = (clean_index == clean_target)
+             
+             if match_mask.any():
+                 # 获取匹配行的 Label
+                 target_label = df_raw.index[match_mask][0]
+                 
+                 # 获取行号
+                 idx_pos = df_raw.index.get_loc(target_label)
+                 
+                 # 如果有重复(比如母公司/合并)，通常取最后一个（或者看需求）
+                 # 这里假设我们已经读了合并表，取最后一个通常比较安全（因为总计在最下）
+                 if isinstance(idx_pos, slice):
+                     idx_pos = idx_pos.stop - 1
+                 elif hasattr(idx_pos, '__iter__'): 
+                     idx_pos = idx_pos[-1]
+                 
+                 # 🔥 执行切片：只保留到“负债合计”这一行
+                 if isinstance(idx_pos, int):
+                    df_raw = df_raw.iloc[:idx_pos + 1]
+             else:
+                 st.warning(f"⚠️ 未找到严格等于 '{total_col_name}' 的行，将显示完整表格。建议检查 Excel 行名。")
+
+        # 2. 获取总计数据
+        total_row = find_row_fuzzy(df_raw, [total_col_name])
         
     except Exception as e:
-        st.error(f"❌ 数据预处理错误: {e}")
+        st.error(f"❌ 数据处理错误: {e}")
         return
 
+    # 3. 计算占比
     df = df_raw.copy()
     for period in ['T', 'T_1', 'T_2']:
         total = total_row[period]
@@ -224,6 +245,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
 
+    # 4. 显示明细数据 (现在是切片后的干净表格了！)
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
         with c1: st.markdown(f"### {analysis_name}结构明细")
@@ -257,7 +279,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         text = ""
         try:
             if analysis_name == "资产":
-                # 🔥 使用模糊查找，防止“流动资产合计 ”这种带空格的情况报错
                 curr_row = find_row_fuzzy(df_raw, ['流动资产合计', '流动资产小计'])
                 non_curr_row = find_row_fuzzy(df_raw, ['非流动资产合计', '非流动资产小计'])
                 
@@ -268,7 +289,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"占总资产的比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。\n\n"
                         f"在总资产构成中，公司资产主要为 **{'、'.join(top_5)}** 等。")
             elif analysis_name == "负债":
-                # 🔥 使用模糊查找
                 curr_row = find_row_fuzzy(df_raw, ['流动负债合计', '流动负债小计'])
                 non_curr_row = find_row_fuzzy(df_raw, ['非流动负债合计', '非流动负债小计'])
                 
@@ -304,8 +324,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             else:
                 text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
         except Exception as e:
-             # 🔥 错误提示优化
-             text = f"⚠️ 生成文案时出错: {e}。\n\n请检查您的 Excel 表格中是否包含 **【流动负债合计】** 和 **【非流动负债合计】** 这两行（注意不要有错别字）。"
+             text = f"⚠️ 生成文案时出错: {e}。\n\n请检查您的 Excel 表格中是否包含 **【流动负债合计】** 和 **【非流动负债合计】** 这两行。"
         st.code(text, language='text')
 
     with tab3:
@@ -350,7 +369,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
                 st.code(prompt, language='text')
 
-# ================= 3. Sidebar =================
+# ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"])
@@ -364,7 +383,7 @@ with st.sidebar:
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
 
-# ================= 4. Main Program =================
+# ================= 4. 主程序 =================
 
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
@@ -416,7 +435,6 @@ else:
         if sheet_name in all_sheet_names:
             return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
         
-        # 去除所有空格进行对比
         clean_target = sheet_name.replace(" ", "")
         for actual_name in all_sheet_names:
             if actual_name.replace(" ", "") == clean_target:
@@ -430,7 +448,6 @@ else:
             df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
             
             if df is None:
-                # 🔥 失败时，返回 Sheet 列表供用户参考
                 return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
 
             df = df.iloc[:, [0, 4, 5, 6]]
