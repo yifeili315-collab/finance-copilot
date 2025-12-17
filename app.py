@@ -244,13 +244,36 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.caption("👉 点击右上角复制，发送给 AI (DeepSeek/ChatGPT)。")
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
+        
+        # 🔥 核心修改：动态分母文字，避免负债分析时说"占总资产比例"
+        denom_text = "总资产" if analysis_name == "资产" else f"{analysis_name}总额"
+
         for subject in major_subjects:
             row = df.loc[subject]
-            diff = row['T'] - row['T_1']
-            pct = safe_pct(diff, row['T_1'])
-            direction = "增加" if diff >= 0 else "减少"
-            pct_label = "增幅" if diff >= 0 else "降幅"
-            prompt = f"""【任务】分析“{subject}”变动原因。\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占比分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n【2. 变动情况】\n截至{d_t}，较上期{direction}{abs(diff):,.2f}万元，{pct_label}{abs(pct):.2f}%。\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
+            
+            # 1. 计算 T-1 较 T-2 的变动 (Trend 1)
+            diff_prev = row['T_1'] - row['T_2']
+            pct_prev = safe_pct(diff_prev, row['T_2'])
+            dir_prev = "增加" if diff_prev >= 0 else "减少"
+            label_prev = "增幅" if diff_prev >= 0 else "降幅"
+
+            # 2. 计算 T 较 T-1 的变动 (Trend 2)
+            diff_curr = row['T'] - row['T_1']
+            pct_curr = safe_pct(diff_curr, row['T_1'])
+            dir_curr = "增加" if diff_curr >= 0 else "减少"
+            label_curr = "增幅" if diff_curr >= 0 else "降幅"
+            
+            prompt = f"""【任务】分析“{subject}”变动原因。
+【1. 数据趋势】
+{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。
+【2. 变动情况】
+截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；
+截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。
+【3. 附注线索】
+{find_context(subject, word_data_list)}
+【4. 写作要求】
+结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
+            
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
                 st.code(prompt, language='text')
 
@@ -263,41 +286,28 @@ with st.sidebar:
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
     uploaded_word_files = st.file_uploader("Word 附注 (可选)", type=["docx"], accept_multiple_files=True)
     
-    # 🔥 核心修改：将 Sheet配置 藏到高级设置里
     with st.expander("⚙️ 高级设置 (Sheet名称/表头行)"):
         header_row = st.number_input("表头所在行 (默认2，即第3行)", value=2, min_value=0)
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债表")
 
-# ================= 4. 主程序 (含 🛑 使用前必读) =================
+# ================= 4. 主程序 =================
 
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
-    
-    # 🔥 核心更新：显眼的“使用说明”和“Sheet名列表”
     st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
-    
     st.markdown("""
     ### 🛑 使用前必读 (Requirements)
     为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    
-    1.  **Sheet 名称严格匹配**：
-        * 资产分析 -> Sheet 名必须为 `1.合并资产表`
-        * 负债分析 -> Sheet 名必须为 `2.合并负债表`
-        
-    2.  **数据列位置固定**：
-        * 系统默认读取 **E、F、G 列**（即模版中的“万元”列）。
-        
-    3.  **表头位置固定**：
-        * 表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
-        
+    1. **Sheet 名称严格匹配**：资产表为 `1.合并资产表`，负债表为 `2.合并负债表`。
+    2. **数据列位置固定**：系统默认读取 **E、F、G 列**（即模版中的“万元”列）。
+    3. **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
     ---
     ### 🚀 快速上手：
-    1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
-    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)，直接粘贴到报告中。
+    1. **左侧上传**：拖入 Excel 底稿和 Word 附注。
+    2. **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
+    3. **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)，直接粘贴到报告中。
     """)
-    
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
 else:
@@ -317,7 +327,6 @@ else:
     def get_clean_data(sheet_name):
         try:
             df = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
-            # 🔥 锁定读取：科目(A) + 数据(E,F,G)
             df = df.iloc[:, [0, 4, 5, 6]]
             orig_cols = df.columns.tolist()
             d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
