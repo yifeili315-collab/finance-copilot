@@ -91,7 +91,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER 
-        # 🟢 [修改]：设置单倍行距，段前段后0，确保垂直居中生效
+        # 设置单倍行距，段前段后0，确保垂直居中生效
         paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
         paragraph.paragraph_format.space_before = Pt(0)
         paragraph.paragraph_format.space_after = Pt(0)
@@ -105,13 +105,13 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-        # 🟢 [修改]：设置表格高度最小值为 0.6cm
+        # 设置表格高度最小值为 0.6cm
         table.rows[r_idx+1].height = Cm(0.6)
         
         subject_name = str(row[0]).strip()
         is_bold = False
         if bold_rows and subject_name in bold_rows: is_bold = True
-        # 🟢 [修改]：移除了 "活动" 关键词，防止“经营活动现金流入小计”被错误加粗
+        # 移除了 "活动" 关键词，防止“经营活动现金流入小计”被错误加粗
         elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额", "构成"]): is_bold = True
         elif subject_name.endswith("：") or subject_name.endswith(":"): is_bold = True
 
@@ -124,7 +124,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
             
             paragraph = cell.paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            # 🟢 [修改]：设置单倍行距，段前段后0，确保垂直居中生效
+            # 设置单倍行距，段前段后0，确保垂直居中生效
             paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
             paragraph.paragraph_format.space_before = Pt(0)
             paragraph.paragraph_format.space_after = Pt(0)
@@ -478,8 +478,10 @@ def calculate_cash_flow_percentages(df_raw, d_labels):
                 pct_t = safe_pct(row['T'], denom_row['T'])
                 pct_t1 = safe_pct(row['T_1'], denom_row['T_1'])
                 pct_t2 = safe_pct(row['T_2'], denom_row['T_2'])
-                data_list.append([subject, f"{pct_t:.2f}%", f"{pct_t1:.2f}%", f"{pct_t2:.2f}%"])
-    return pd.DataFrame(data_list, columns=["项目", f"{d_t}占比", f"{d_t1}占比", f"{d_t2}占比"]).set_index("项目")
+                # 🟢 [修改]：把 % 放在表头，单元格内仅显示数字
+                data_list.append([subject, f"{pct_t:.2f}", f"{pct_t1:.2f}", f"{pct_t2:.2f}"])
+    # 🟢 [修改]：表头增加 (%)
+    return pd.DataFrame(data_list, columns=["项目", f"{d_t}占比(%)", f"{d_t1}占比(%)", f"{d_t2}占比(%)"]).set_index("项目")
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
@@ -600,7 +602,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             
-            # 🟢 [修改]：按要求格式化文案
+            # 按要求格式化文案
             cf_text = (f"报告期各期，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n"
                      f"截至{d_t1}，发行人{subject}较{d_t2}净{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n"
                      f"截至{d_t}，发行人{subject}较{d_t1}净{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。\n\n"
@@ -720,19 +722,20 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         # T (Latest)
         val_t = r['T']
         pct_t = val_t / period_expenses['T'] * 100 if period_expenses['T'] else 0
-        row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}%"])
+        # 🟢 [修改]：把 % 放在表头，单元格内仅显示数字
+        row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}"])
         sum_t += val_t
         
         # T-1
         val_t1 = r['T_1']
         pct_t1 = val_t1 / period_expenses['T_1'] * 100 if period_expenses['T_1'] else 0
-        row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}%"])
+        row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}"])
         sum_t1 += val_t1
 
         # T-2
         val_t2 = r['T_2']
         pct_t2 = val_t2 / period_expenses['T_2'] * 100 if period_expenses['T_2'] else 0
-        row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}%"])
+        row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}"])
         sum_t2 += val_t2
         
         period_exp_data.append(row_dat)
@@ -740,19 +743,19 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     # 添加期间费用合计行
     total_row = ["期间费用合计"]
     # T
-    total_row.extend([f"{sum_t:,.2f}", "100.00%"])
+    total_row.extend([f"{sum_t:,.2f}", "100.00"])
     # T-1
-    total_row.extend([f"{sum_t1:,.2f}", "100.00%"])
+    total_row.extend([f"{sum_t1:,.2f}", "100.00"])
     # T-2
-    total_row.extend([f"{sum_t2:,.2f}", "100.00%"])
+    total_row.extend([f"{sum_t2:,.2f}", "100.00"])
     
     period_exp_data.append(total_row)
     
-    # 🟢 [修改]：修正表头为“占期间费用比例”
+    # 🟢 [修改]：表头增加 (%)
     pe_cols = ["项目", 
-               f"{d_t}金额", f"{d_t}占期间费用比例", 
-               f"{d_t1}金额", f"{d_t1}占期间费用比例",
-               f"{d_t2}金额", f"{d_t2}占期间费用比例"]
+               f"{d_t}金额", f"{d_t}占期间费用比例(%)", 
+               f"{d_t1}金额", f"{d_t1}占期间费用比例(%)",
+               f"{d_t2}金额", f"{d_t2}占期间费用比例(%)"]
     
     df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
@@ -821,7 +824,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         diff_rev_prev = rev_t1 - rev_t2
         diff_rev_curr = rev_t - rev_t1
         
-        # 🟢 [修改]：按要求格式化文案：增加/减少 + 增幅/降幅
+        # 按要求格式化文案：增加/减少 + 增幅/降幅
         dir_rev_prev = "增加" if diff_rev_prev >= 0 else "减少"
         label_rev_prev = "增幅" if diff_rev_prev >= 0 else "降幅"
         pct_rev_prev = safe_pct(diff_rev_prev, rev_t2)
