@@ -16,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= 2. 核心逻辑函数 (Global Functions) =================
+# ================= 2. 核心逻辑函数 =================
 
 def set_cell_border(cell, **kwargs):
     """设置单元格边框"""
@@ -160,7 +160,7 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
-# 🔥 核心修正：将模糊查找 Excel Sheet 的函数移到最外层，防止 NameError
+# 🔥 核心修正：模糊查找 Sheet 名称
 def fuzzy_load_excel(file_obj, sheet_name, header_row):
     try:
         xl = pd.ExcelFile(file_obj)
@@ -291,7 +291,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
     with tab3:
         latest_date_label = d_labels[0]
         st.info(f"💡 **提示**：以下科目占比均基于 **{latest_date_label} (最新一期)** 的数据计算。")
-        if word_data_list: st.success(f"✅ 已结合 **{len(word_data_list)} 个 Word 附注** 生成深度分析指令。")
+        if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
         else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令。")
         exclude_list = ['合计', '总计', '总额']
         major_subjects = df[(df['占比_T'] > 0.01) & (~df.index.str.contains('|'.join(exclude_list)))].index.tolist()
@@ -313,6 +313,9 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
 
 # ================= 4. 业务逻辑：现金流量 =================
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
+    # 🔥 核心修复：解包日期标签
+    d_t, d_t1, d_t2 = d_labels
+    
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
     for display_name, keywords in structure:
@@ -322,7 +325,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             if row.name is None: val_t, val_t1, val_t2 = 0, 0, 0
             else: val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
             data_list.append([display_name, f"{val_t:,.2f}" if val_t!="" else "", f"{val_t1:,.2f}" if val_t1!="" else "", f"{val_t2:,.2f}" if val_t2!="" else ""])
-    df_display = pd.DataFrame(data_list, columns=["项目", d_labels[0], d_labels[1], d_labels[2]])
+    df_display = pd.DataFrame(data_list, columns=["项目", d_t, d_t1, d_t2])
     df_display.set_index("项目", inplace=True)
 
     tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "🤖 AI 分析指令"])
@@ -387,10 +390,10 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         text += (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。"
                  f"报告期内筹资活动产生的现金流量净额较大，主要系吸收投资收到的现金及取得借款收到的现金流入所致。\n\n")
         text += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由取得借款所收到的现金及吸收投资收到的现金构成。"
-                 f"{d_labels[2]}、{d_labels[1]}及{d_labels[0]}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
+                 f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
                  f"其中取得借款收到的现金分别为{fin_borrow_in['T_2']:,.2f}万元、{fin_borrow_in['T_1']:,.2f}万元及{fin_borrow_in['T']:,.2f}万元；"
                  f"吸收投资收到的现金分别为{fin_invest_in['T_2']:,.2f}万元、{fin_invest_in['T_1']:,.2f}万元及{fin_invest_in['T']:,.2f}万元。\n\n")
-        text += (f"{d_labels[2]}、{d_labels[1]}及{d_labels[0]}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
+        text += (f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流出分别为{fin_out_total['T_2']:,.2f}万元、{fin_out_total['T_1']:,.2f}万元和{fin_out_total['T']:,.2f}万元。"
                  f"发行人筹资活动现金流出主要由偿还债务所支付的现金及分配股利、利润或偿付利息支付的现金构成。"
                  f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
                  f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
@@ -399,7 +402,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     with tab3:
         st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
         if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
-        else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据。")
+        else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据生成指令。")
         target_subjects = ["经营活动产生的现金流量净额", "投资活动产生的现金流量净额", "筹资活动产生的现金流量净额"]
         for subject in target_subjects:
             row = find_row_fuzzy(df_raw, [subject])
@@ -447,7 +450,6 @@ if not uploaded_excel:
     > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
     > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
     > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
-    
     ---
     ### 🚀 快速上手：
     1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
