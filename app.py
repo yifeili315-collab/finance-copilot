@@ -799,12 +799,104 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
 
 
 # ================= 3. 侧边栏 =================
+# ================= 3. 侧边栏 (已精简) =================
 with st.sidebar:
     st.title("🎛️ 操控台")
-    analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"])
+    analysis_page = st.radio(
+        "请选择要生成的章节：", 
+        ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"]
+    )
     st.markdown("---")
     
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
+    
+    # 💡 提示：Word 附注和高级设置已隐藏，系统将使用默认配置
+
+# ================= 4. 主程序 =================
+
+# --- ⚙️ 系统默认配置 (原高级设置内容) ---
+# 由于删除了前端设置入口，此处定义默认值
+DEFAULT_HEADER_ROW = 2  # 第3行
+SHEET_CONFIG = {
+    "asset": "1.合并资产表",
+    "liab": "2.合并负债及权益表",
+    "profit": "3.合并利润表",
+    "cash": "4.合并现金流量表",
+    "ratios": "5-3主要财务指标计算-方案3（专用公司债）"
+}
+# ------------------------------------
+
+if not uploaded_excel:
+    st.title("📊 财务分析报告自动化助手")
+    st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
+    st.markdown("""
+    ### 🚀 快速上手：
+    1.  **左侧上传**：请在左侧上传 Excel 底稿文件。
+    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
+    3.  **一键导出**：支持导出 **精排版 Word 表格**。
+    """)
+    st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
+
+else:
+    # Word 附注逻辑已移除，设置为空列表以兼容现有函数
+    word_data_list = [] 
+
+    # 定义数据读取通用函数 (引用默认配置)
+    def get_clean_data(target_sheet_name):
+        try:
+            # 使用默认的 HEADER_ROW
+            df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, DEFAULT_HEADER_ROW)
+            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
+            
+            # 尝试截取前几列 (假设格式标准)
+            df = df.iloc[:, [0, 4, 5, 6]]
+            orig_cols = df.columns.tolist()
+            d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
+            df.columns = ['科目', 'T', 'T_1', 'T_2']
+            df = df.dropna(subset=['科目'])
+            df['科目'] = df['科目'].astype(str).str.strip()
+            for c in ['T', 'T_1', 'T_2']:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            df.set_index('科目', inplace=True)
+            return df, d_labels, None
+        except Exception as e: return None, None, str(e)
+
+    st.header(f"📊 {analysis_page}")
+
+    # --- 页面路由逻辑 ---
+    
+    if analysis_page == "(一) 资产结构分析":
+        df_asset, d_labels, err = get_clean_data(SHEET_CONFIG["asset"])
+        if df_asset is not None: process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
+
+    elif analysis_page == "(二) 负债结构分析":
+        df_liab, d_labels, err = get_clean_data(SHEET_CONFIG["liab"])
+        if df_liab is not None:
+            total_name = "负债合计" 
+            if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
+            process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
+
+    elif analysis_page == "(三) 现金流量分析":
+        df_cash, d_labels, err = get_clean_data(SHEET_CONFIG["cash"])
+        if df_cash is not None:
+            process_cash_flow_tab(df_cash, word_data_list, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
+
+    elif analysis_page == "(四) 财务指标分析":
+        # 财务指标表通常表头不固定，使用 fuzzy_load_excel 的内部逻辑
+        df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, SHEET_CONFIG["ratios"], DEFAULT_HEADER_ROW)
+        if df_ratios is not None:
+            process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
+        else: 
+            st.error(f"❌ 读取失败：未找到 Sheet '{SHEET_CONFIG['ratios']}'")
+
+    elif analysis_page == "(五) 盈利能力分析":
+        df_profit, d_labels, err = get_clean_data(SHEET_CONFIG["profit"])
+        if df_profit is not None:
+            process_profitability_tab(df_profit, word_data_list, d_labels)
+        else: st.error(f"❌ 读取失败：{err}")
 # ================= 4. 主程序 =================
 
 if not uploaded_excel:
