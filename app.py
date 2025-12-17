@@ -9,17 +9,17 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.oxml import OxmlElement
 import io
 
-# ================= 1. 页面配置 =================
+# ================= 1. Page Config =================
 st.set_page_config(
     page_title="智能财务分析系统", 
     page_icon="📈",
     layout="wide"
 )
 
-# ================= 2. 核心逻辑函数 =================
+# ================= 2. Core Logic =================
 
 def set_cell_border(cell, **kwargs):
-    """设置单元格边框"""
+    """Set cell borders (XML)"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
@@ -37,7 +37,7 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 生成精排版 Word 表格"""
+    """🔥 Generate Polished Word Table"""
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -169,7 +169,6 @@ def safe_pct(num, denom):
 
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
-        # 🔥 智能切片：对于负债表，只读取到“负债合计”行
         if analysis_name == "负债":
              total_idx = df_raw.index[df_raw.index.str.contains(total_col_name)].tolist()
              if total_idx:
@@ -184,8 +183,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         
         total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
     except Exception as e:
-        # 🔥 错误处理升级：找不到行时的提示
-        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行。\n\n请检查 Excel 表中是否包含该合计行。")
+        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。错误信息: {e}")
         return
 
     df = df_raw.copy()
@@ -320,7 +318,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%})"):
                 st.code(prompt, language='text')
 
-# ================= 3. 侧边栏 =================
+# ================= 3. Sidebar =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio("请选择要生成的章节：", ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析 (开发中...)", "(四) 财务指标分析 (开发中...)"])
@@ -332,16 +330,14 @@ with st.sidebar:
     with st.expander("⚙️ 高级设置 (Sheet名称/表头行)"):
         header_row = st.number_input("表头所在行 (默认2，即第3行)", value=2, min_value=0)
         sheet_asset = st.text_input("资产表 Sheet 名", value="1.合并资产表")
-        # 🔥 核心修正：默认值改回“2.合并负债及权益表”，与您的截图完全一致
         sheet_liab = st.text_input("负债表 Sheet 名", value="2.合并负债及权益表")
 
-# ================= 4. 主程序 =================
+# ================= 4. Main Program =================
 
 if not uploaded_excel:
     st.title("📊 财务分析报告自动化助手")
     st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
     
-    # 🔥 “小技巧”已完整回归
     st.markdown("""
     ### 🛑 使用前必读 (Requirements)
     为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
@@ -380,9 +376,33 @@ else:
         for msg in word_error_msgs: st.error(msg)
     elif uploaded_word_files: st.success(f"✅ 成功读取 {len(word_data_list)} 个 Word 文件！")
 
-    def get_clean_data(sheet_name):
+    # 🔥 核心修改：新增模糊匹配 Sheet 名称函数 (忽略空格)
+    def fuzzy_load_excel(file_obj, sheet_name, header_row):
+        xl = pd.ExcelFile(file_obj)
+        all_sheet_names = xl.sheet_names
+        
+        # 1. 精确匹配
+        if sheet_name in all_sheet_names:
+            return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
+        
+        # 2. 模糊匹配 (去空格)
+        clean_target = sheet_name.replace(" ", "")
+        for actual_name in all_sheet_names:
+            if actual_name.replace(" ", "") == clean_target:
+                st.toast(f"⚠️ 检测到 Sheet 名称有空格，已自动修正为：'{actual_name}'")
+                return pd.read_excel(file_obj, sheet_name=actual_name, header=header_row), None
+        
+        # 3. 失败返回
+        return None, all_sheet_names
+
+    def get_clean_data(target_sheet_name):
         try:
-            df = pd.read_excel(uploaded_excel, sheet_name=sheet_name, header=header_row)
+            # 🔥 使用新的模糊读取函数
+            df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
+            
+            if df is None:
+                return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
+
             df = df.iloc[:, [0, 4, 5, 6]]
             orig_cols = df.columns.tolist()
             d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
@@ -403,14 +423,7 @@ else:
         if df_asset is not None:
             process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
         else:
-            # 🔥 智能错误提示：列出所有 Sheet 名字，让用户自己看哪里不对
-            try:
-                xl = pd.ExcelFile(uploaded_excel)
-                all_sheets = xl.sheet_names
-            except:
-                all_sheets = "无法读取 Sheet 列表"
-            
-            st.error(f"❌ 读取失败：未找到 Sheet **{sheet_asset}**\n\n💡 **诊断信息**：\n您的 Excel 包含以下 Sheet：\n{all_sheets}\n\n请在左侧侧边栏【高级设置】中修改为您 Excel 里的真实名称。")
+            st.error(f"❌ 读取失败：{err}\n\n请检查侧边栏【高级设置】中的 Sheet 名称。")
 
     elif analysis_page == "(二) 负债结构分析":
         df_liab, d_labels, err = get_clean_data(sheet_liab)
@@ -420,14 +433,7 @@ else:
                 total_name = "负债总计"
             process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
         else:
-            # 🔥 智能错误提示：列出所有 Sheet 名字
-            try:
-                xl = pd.ExcelFile(uploaded_excel)
-                all_sheets = xl.sheet_names
-            except:
-                all_sheets = "无法读取 Sheet 列表"
-                
-            st.error(f"❌ 读取失败：未找到 Sheet **{sheet_liab}**\n\n💡 **诊断信息**：\n您的 Excel 包含以下 Sheet：\n{all_sheets}\n\n请在左侧侧边栏【高级设置】中修改为您 Excel 里的真实名称。")
+            st.error(f"❌ 读取失败：{err}\n\n请检查侧边栏【高级设置】中的 Sheet 名称。")
 
     else:
         st.info("🚧 该模块正在施工中，敬请期待后续更新...")
