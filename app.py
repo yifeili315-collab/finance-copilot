@@ -37,7 +37,7 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """🔥 生成精排版 Word 表格 (五号字体，全居中)"""
+    """🔥 生成精排版 Word 表格"""
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -242,14 +242,13 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.dataframe(final_df, use_container_width=True)
 
     with tab2:
-        st.markdown("👇 **直接复制：**")
+        st.markdown("👇 **直接复制（已开启自动换行）：**")
         top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
         text = ""
         try:
             if analysis_name == "资产":
                 curr_row = find_row_fuzzy(df_raw, ['流动资产合计', '流动资产小计'])
                 non_curr_row = find_row_fuzzy(df_raw, ['非流动资产合计', '非流动资产小计'])
-                # 🔥 优化：增加换行符 \n\n，让文案自动分段
                 text = (f"报告期内，发行人资产总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"其中，流动资产金额分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
                         f"占总资产的比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%；\n\n"
@@ -268,7 +267,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                 dir_curr = "增加" if diff_curr >= 0 else "减少"
                 label_curr = "增幅" if diff_curr >= 0 else "降幅"
                 trend_desc = "增长" if diff_curr >= 0 else "下降"
-                # 🔥 优化：增加换行符 \n\n
                 text = (f"报告期内，发行人负债总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"{d_labels[1]}较{d_labels[2]}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；"
                         f"{d_labels[0]}发行人负债较{d_labels[1]}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"
@@ -278,7 +276,9 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
-            st.code(text, language='text')
+            
+            # 🔥 替换 st.code 为 st.text_area
+            st.text_area("文案内容", value=text, height=350, help="按 Ctrl+A 全选，Ctrl+C 复制")
         except Exception as e:
              st.error(f"生成文案出错: {e}")
 
@@ -300,11 +300,11 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             pct_curr = safe_pct(diff_curr, row['T_1'])
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
-            # 🔥 优化：在 Prompt 中增加换行，使其更清晰
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
             if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
-                st.code(prompt, language='text')
+                # 🔥 替换 st.code 为 st.text_area
+                st.text_area(label="分析指令", value=prompt, height=250, key=f"area_{subject}", help="按 Ctrl+A 全选，Ctrl+C 复制")
 
 # ================= 4. 业务逻辑：现金流量 =================
 def calculate_cash_flow_percentages(df_raw, d_labels):
@@ -412,7 +412,9 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
                      f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
-            st.code(text_op, language='text')
+            
+            # 🔥 替换 st.code 为 st.text_area
+            st.text_area("文案 - 经营活动", value=text_op, height=350, key="txt_op", help="Ctrl+A 全选")
 
         # Box 2
         with st.expander("📝 2、投资活动产生的现金流量分析", expanded=True):
@@ -422,11 +424,11 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
                      f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
                      f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。")
-            st.code(text_inv, language='text')
+            st.text_area("文案 - 投资活动", value=text_inv, height=250, key="txt_inv", help="Ctrl+A 全选")
 
         # Box 3
         with st.expander("📝 3、筹资活动产生的现金流量分析", expanded=True):
-            text_fin = (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。\n"
+            text_fin = (f"报告期内，发行人筹资活动产生的现金流量净额分别为{fin_net['T_2']:,.2f}万元、{fin_net['T_1']:,.2f}万元和{fin_net['T']:,.2f}万元。\n\n"
                      f"报告期内筹资活动产生的现金流量净额较大，主要系吸收投资收到的现金及取得借款收到的现金流入所致。\n\n")
             text_fin += (f"筹资活动现金流入方面，发行人筹资活动现金流入主要由取得借款所收到的现金及吸收投资收到的现金构成。"
                      f"{d_t2}、{d_t1}及{d_t}，发行人筹资活动产生的现金流入分别为{fin_in_total['T_2']:,.2f}万元、{fin_in_total['T_1']:,.2f}万元及{fin_in_total['T']:,.2f}万元，"
@@ -436,7 +438,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"发行人筹资活动现金流出主要由偿还债务所支付的现金及分配股利、利润或偿付利息支付的现金构成。"
                      f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
                      f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
-            st.code(text_fin, language='text')
+            st.text_area("文案 - 筹资活动", value=text_fin, height=350, key="txt_fin", help="Ctrl+A 全选")
 
     with tab4:
         st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
@@ -452,7 +454,9 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t1}，较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元；\n截至{d_t}，较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元。"""
             if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。"""
-            with st.expander(f"📌 {subject}"): st.code(prompt, language='text')
+            with st.expander(f"📌 {subject}"):
+                # 🔥 替换 st.code 为 st.text_area
+                st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", help="Ctrl+A 全选")
 
 # ================= 3. 侧边栏 =================
 with st.sidebar:
