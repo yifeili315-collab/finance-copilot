@@ -419,16 +419,16 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；\n\n"
                      f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
                      f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
-                     f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
+                     f"发行人收到其他与经营活动有关的现金主要包括（）。\n\n")
             text_op += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。\n\n"
-                     f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
+                     f"报告期内，发行人经营活动现金流出主要来源于（）。"
                      f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。\n\n"
                      f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
-                     f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
+                     f"支付其他与经营活动有关的现金包括：（）等。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
-                     f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
+                     f"主要系（）所致。")
             st.text_area("文案内容", value=text_op, height=350, label_visibility="collapsed", key="txt_op")
 
         # Box 2
@@ -439,7 +439,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
                      f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
                      f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
-                     f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。")
+                     f"发行人投资活动现金流量净额【分析】，主要是发行人（）所致。")
             st.text_area("文案内容", value=text_inv, height=250, label_visibility="collapsed", key="txt_inv")
 
         # Box 3
