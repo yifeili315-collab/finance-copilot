@@ -16,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= 2. 核心逻辑函数 =================
+# ================= 2. 核心逻辑函数 (Global Functions) =================
 
 def set_cell_border(cell, **kwargs):
     """设置单元格边框"""
@@ -160,7 +160,27 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
-# 🔥 核心：模糊查找函数 (移动到这里，确保被定义)
+# 🔥 核心修正：将模糊查找 Excel Sheet 的函数移到最外层，防止 NameError
+def fuzzy_load_excel(file_obj, sheet_name, header_row):
+    try:
+        xl = pd.ExcelFile(file_obj)
+        all_sheet_names = xl.sheet_names
+        
+        # 1. 精确匹配
+        if sheet_name in all_sheet_names:
+            return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
+        
+        # 2. 忽略空格匹配
+        clean_target = sheet_name.replace(" ", "")
+        for actual_name in all_sheet_names:
+            if actual_name.replace(" ", "") == clean_target:
+                st.toast(f"⚠️ 检测到 Sheet 名称不一致，已自动修正为：'{actual_name}'")
+                return pd.read_excel(file_obj, sheet_name=actual_name, header=header_row), None
+        
+        return None, all_sheet_names
+    except Exception as e:
+        return None, [str(e)]
+
 def find_row_fuzzy(df, keywords, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
@@ -175,7 +195,7 @@ def find_row_fuzzy(df, keywords, default_val=None):
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
-# ================= 3. 业务逻辑 =================
+# ================= 3. 业务逻辑：资产/负债 =================
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
         if analysis_name == "负债":
@@ -291,6 +311,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.code(prompt, language='text')
 
+# ================= 4. 业务逻辑：现金流量 =================
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
@@ -377,7 +398,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
 
     with tab3:
         st.info("💡 **提示**：现金流量分析侧重于三大活动净额变动。")
-        if word_data_list: st.success(f"✅ 已结合 Word 附注生成指令。")
+        if word_data_list: st.success(f"✅ **附注加载成功**：已结合 **{len(word_data_list)} 个 Word 附注** 生成指令。")
         else: st.warning("⚠️ 未检测到 Word 附注，仅基于 Excel 数据。")
         target_subjects = ["经营活动产生的现金流量净额", "投资活动产生的现金流量净额", "筹资活动产生的现金流量净额"]
         for subject in target_subjects:
@@ -414,6 +435,7 @@ if not uploaded_excel:
     st.markdown("""
     ### 🛑 使用前必读 (Requirements)
     为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
+    
     1.  **Sheet 名称严格匹配**：
         * 资产表 -> `1.合并资产表`
         * 负债表 -> `2.合并负债及权益表`
@@ -425,7 +447,12 @@ if not uploaded_excel:
     > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
     > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
     > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
+    
     ---
+    ### 🚀 快速上手：
+    1.  **左侧上传**：拖入 Excel 底稿和 Word 附注。
+    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / AI指令**。
+    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
     """)
     st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
@@ -437,7 +464,7 @@ else:
             if success: word_data_list.append({'source': w.name, 'content': content})
             else: st.error(err_msg)
     if uploaded_word_files and not word_data_list: st.stop()
-    elif uploaded_word_files: st.success(f"✅ 成功读取 {len(word_data_list)} 个 Word 文件！")
+    elif uploaded_word_files: st.success(f"✅ **附注加载成功**：已读取 {len(word_data_list)} 个 Word 文件")
 
     def get_clean_data(target_sheet_name):
         try:
