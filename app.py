@@ -9,17 +9,17 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.oxml import OxmlElement
 import io
 
-# ================= 1. Page Config =================
+# ================= 1. 页面配置 =================
 st.set_page_config(
     page_title="智能财务分析系统", 
     page_icon="📈",
     layout="wide"
 )
 
-# ================= 2. Core Logic =================
+# ================= 2. 核心逻辑函数 =================
 
 def set_cell_border(cell, **kwargs):
-    """Set cell borders (XML)"""
+    """设置单元格边框"""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
@@ -37,7 +37,7 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表"):
-    """🔥 Generate Polished Word Table"""
+    """🔥 生成精排版 Word 表格"""
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -167,23 +167,51 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 else 0.0
 
+# 🔥 新增：模糊查找行函数（忽略空格，兼容别名）
+def find_row_fuzzy(df, keywords):
+    """在 DataFrame 索引中查找包含关键词的行（忽略空格）"""
+    if isinstance(keywords, str): keywords = [keywords]
+    
+    # 创建一个去除所有空格的临时索引用于搜索
+    clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
+    
+    for kw in keywords:
+        clean_kw = kw.replace(" ", "")
+        # 查找
+        mask = clean_index.str.contains(clean_kw, case=False, na=False)
+        if mask.any():
+            # 返回匹配到的第一行
+            return df.loc[df.index[mask][0]]
+            
+    # 如果都找不到，抛出特定异常
+    raise ValueError(f"未找到包含 {' / '.join(keywords)} 的行")
+
 def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
     try:
+        # 1. 尝试定位总计行（使用模糊匹配）
+        try:
+            total_row = find_row_fuzzy(df_raw, [total_col_name, total_col_name.replace("合计", "总计")])
+        except ValueError:
+             st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行。")
+             return
+
+        # 2. 负债表切片逻辑：找到总计行，切掉下面的权益部分
         if analysis_name == "负债":
-             total_idx = df_raw.index[df_raw.index.str.contains(total_col_name)].tolist()
-             if total_idx:
-                 idx_pos = df_raw.index.get_loc(total_idx[0])
-                 if isinstance(idx_pos, slice):
-                     idx_pos = idx_pos.stop - 1
-                 elif hasattr(idx_pos, '__iter__'): 
-                     idx_pos = idx_pos[0]
-                 
-                 if isinstance(idx_pos, int):
-                    df_raw = df_raw.iloc[:idx_pos + 1]
+             # 再次定位 index 位置用于切片
+             # find_row_fuzzy 返回的是 Series，我们需要它的 name (即索引值)
+             total_row_name = total_row.name
+             idx_pos = df_raw.index.get_loc(total_row_name)
+             
+             if isinstance(idx_pos, slice):
+                 idx_pos = idx_pos.stop - 1
+             elif hasattr(idx_pos, '__iter__'): 
+                 idx_pos = idx_pos[0]
+             
+             if isinstance(idx_pos, int):
+                df_raw = df_raw.iloc[:idx_pos + 1]
         
-        total_row = df_raw[df_raw.index.str.contains(total_col_name)].iloc[0]
     except Exception as e:
-        st.error(f"❌ 分析中断：在表中未找到 '{total_col_name}' 行，请检查 Excel 科目名称或 Sheet 选择是否正确。错误信息: {e}")
+        st.error(f"❌ 数据预处理错误: {e}")
         return
 
     df = df_raw.copy()
@@ -229,8 +257,10 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         text = ""
         try:
             if analysis_name == "资产":
-                curr_row = df_raw[df_raw.index.str.contains('流动资产合计')].iloc[0]
-                non_curr_row = df_raw[df_raw.index.str.contains('非流动资产合计')].iloc[0]
+                # 🔥 使用模糊查找，防止“流动资产合计 ”这种带空格的情况报错
+                curr_row = find_row_fuzzy(df_raw, ['流动资产合计', '流动资产小计'])
+                non_curr_row = find_row_fuzzy(df_raw, ['非流动资产合计', '非流动资产小计'])
+                
                 text = (f"报告期内，发行人资产总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"其中，流动资产金额分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
                         f"占总资产的比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%；\n\n"
@@ -238,8 +268,9 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"占总资产的比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。\n\n"
                         f"在总资产构成中，公司资产主要为 **{'、'.join(top_5)}** 等。")
             elif analysis_name == "负债":
-                curr_row = df_raw[df_raw.index.str.contains('流动负债合计')].iloc[0]
-                non_curr_row = df_raw[df_raw.index.str.contains('非流动负债合计')].iloc[0]
+                # 🔥 使用模糊查找
+                curr_row = find_row_fuzzy(df_raw, ['流动负债合计', '流动负债小计'])
+                non_curr_row = find_row_fuzzy(df_raw, ['非流动负债合计', '非流动负债小计'])
                 
                 diff_prev = total_row['T_1'] - total_row['T_2']
                 pct_prev = safe_pct(diff_prev, total_row['T_2'])
@@ -273,7 +304,8 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             else:
                 text = f"报告期内，发行人{analysis_name}总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n主要构成项目包括：**{'、'.join(top_5)}** 等。"
         except Exception as e:
-             text = f"⚠️ 生成文案时出错: {e}。请检查表格中是否包含【流动负债合计】、【非流动负债合计】等关键行。"
+             # 🔥 错误提示优化
+             text = f"⚠️ 生成文案时出错: {e}。\n\n请检查您的 Excel 表格中是否包含 **【流动负债合计】** 和 **【非流动负债合计】** 这两行（注意不要有错别字）。"
         st.code(text, language='text')
 
     with tab3:
@@ -376,31 +408,29 @@ else:
         for msg in word_error_msgs: st.error(msg)
     elif uploaded_word_files: st.success(f"✅ 成功读取 {len(word_data_list)} 个 Word 文件！")
 
-    # 🔥 核心修改：新增模糊匹配 Sheet 名称函数 (忽略空格)
+    # 🔥 核心修正：模糊查找 Sheet 名称
     def fuzzy_load_excel(file_obj, sheet_name, header_row):
         xl = pd.ExcelFile(file_obj)
         all_sheet_names = xl.sheet_names
         
-        # 1. 精确匹配
         if sheet_name in all_sheet_names:
             return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
         
-        # 2. 模糊匹配 (去空格)
+        # 去除所有空格进行对比
         clean_target = sheet_name.replace(" ", "")
         for actual_name in all_sheet_names:
             if actual_name.replace(" ", "") == clean_target:
-                st.toast(f"⚠️ 检测到 Sheet 名称有空格，已自动修正为：'{actual_name}'")
+                st.toast(f"⚠️ 检测到 Sheet 名称不一致，已自动修正为：'{actual_name}'")
                 return pd.read_excel(file_obj, sheet_name=actual_name, header=header_row), None
         
-        # 3. 失败返回
         return None, all_sheet_names
 
     def get_clean_data(target_sheet_name):
         try:
-            # 🔥 使用新的模糊读取函数
             df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, header_row)
             
             if df is None:
+                # 🔥 失败时，返回 Sheet 列表供用户参考
                 return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
 
             df = df.iloc[:, [0, 4, 5, 6]]
