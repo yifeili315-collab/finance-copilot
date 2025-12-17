@@ -37,8 +37,16 @@ def set_cell_border(cell, **kwargs):
             tcBorders.append(border)
 
 def create_word_table_file(df, title="数据表", bold_rows=None):
-    """🔥 生成精排版 Word 表格"""
+    """🔥 生成精排版 Word 表格 (审计底稿风格)"""
     doc = Document()
+    
+    # 设置页边距为窄边距，以容纳较宽的表格
+    section = doc.sections[0]
+    section.left_margin = Cm(1.27)
+    section.right_margin = Cm(1.27)
+    section.top_margin = Cm(1.27)
+    section.bottom_margin = Cm(1.27)
+
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
@@ -57,7 +65,18 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table.autofit = False 
     
-    col_widths = [Cm(6.0)] + [Cm(3.0)] * (len(export_df.columns) - 1)
+    # 动态计算列宽：首列略宽，数据列均匀分布
+    # 总可用宽度约 18.5cm。如果列数多，自动压缩数据列宽。
+    num_cols = len(export_df.columns)
+    if num_cols > 5:
+        first_col_w = Cm(5.0)
+        other_col_w = Cm(2.2) 
+    else:
+        first_col_w = Cm(6.0)
+        other_col_w = Cm(3.0)
+
+    col_widths = [first_col_w] + [other_col_w] * (num_cols - 1)
+    
     for i, width in enumerate(col_widths):
         for row in table.rows:
             row.cells[i].width = width
@@ -69,6 +88,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     for i, col_name in enumerate(export_df.columns):
         cell = hdr_cells[i]
         cell.text = str(col_name)
+        # 表头：上下粗框 (sz=12 -> 1.5pt)，左右细框
         set_cell_border(cell, top={"val": "single", "sz": 12}, bottom={"val": "single", "sz": 12}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
@@ -92,6 +112,7 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         for i, val in enumerate(row):
             cell = row_cells[i]
             cell.text = str(val) if pd.notna(val) and val != "" else ""
+            # 最后一行底部粗框，其他行细框
             bottom_sz = 12 if r_idx == len(export_df) - 1 else 4
             set_cell_border(cell, top={"val": "single", "sz": 4}, bottom={"val": "single", "sz": bottom_sz}, left={"val": "single", "sz": 4}, right={"val": "single", "sz": 4})
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -617,8 +638,8 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
-            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行
-            if item in ['销售费用', '管理费用', '研发费用', '财务费用', '其他收益', '营业外收入', '营业外支出']:
+            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除)
+            if item in ['销售费用', '管理费用', '研发费用', '财务费用', '营业外收入', '营业外支出']:
                 if val_t == 0 and val_t1 == 0 and val_t2 == 0:
                     continue
 
