@@ -183,7 +183,7 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
         if target_sheet is None:
             return None, all_sheet_names
 
-        # 2. 如果是财务指标表，使用智能读取逻辑 (忽略 header_row 参数)
+        # 2. 如果是财务指标表，使用智能读取逻辑
         if "财务指标" in sheet_name or "5-3" in sheet_name:
             return smart_load_ratios(file_obj, target_sheet)
         
@@ -193,43 +193,37 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
     except Exception as e:
         return None, [str(e)]
 
-# 🔥 核心升级：智能读取财务指标表 (自动找表头，自动找列)
 def smart_load_ratios(file_obj, sheet_name):
     try:
         # 1. 先不带表头读取，扫描前 10 行找 "项目" 或 "指标"
         df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None)
         header_idx = -1
         for i in range(10):
-            # 把这一行转成字符串，看是否包含关键词
             row_values = df_raw.iloc[i].astype(str).values
             if any("项目" in v or "指标" in v for v in row_values):
                 header_idx = i
                 break
         
-        if header_idx == -1:
-            # 兜底：如果找不到，就默认用第 2 行 (Index 1)
-            header_idx = 1
+        if header_idx == -1: header_idx = 1
             
-        # 2. 重新读取，指定正确的表头行
+        # 2. 重新读取
         df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_idx)
         
-        # 3. 智能寻找 T, T-1, T-2 所在的列
-        # 规则：寻找包含 "年"、"期"、"T"、"20" 的列
+        # 3. 智能寻找日期列
         cols = df.columns.tolist()
         date_col_indices = []
-        item_col_idx = 0 # 默认第一列是项目
         
+        # 寻找包含 "年"、"T"、"20xx" 的列
         for idx, col_name in enumerate(cols):
             s = str(col_name)
             if "年" in s or "T" in s or "202" in s or "期" in s:
                 date_col_indices.append(idx)
         
-        # 如果找到至少 3 个日期列，取前 3 个
+        # 默认取第1列(项目) + 找到的前3个日期列
         if len(date_col_indices) >= 3:
-            target_cols = [item_col_idx] + date_col_indices[:3]
+            target_cols = [0] + date_col_indices[:3]
         else:
-            # 找不到就猜：通常是 第1列 + 第3,4,5列 (C,D,E) 或者是 (B,C,D)
-            # 根据用户报错 "Unnamed: 4" (Col E)，推测可能是 C, D, E
+            # 找不到就猜：C, D, E 列
             target_cols = [0, 2, 3, 4]
             
         df_final = df.iloc[:, target_cols]
@@ -239,7 +233,7 @@ def smart_load_ratios(file_obj, sheet_name):
         d_labels = [extract_date_label(c) for c in orig_cols[1:]]
         df_final.columns = ['科目', 'T', 'T_1', 'T_2']
         
-        # 5. 清洗数据
+        # 5. 清洗
         df_final = df_final.dropna(subset=['科目'])
         df_final['科目'] = df_final['科目'].astype(str).str.strip()
         for c in ['T', 'T_1', 'T_2']:
@@ -249,20 +243,25 @@ def smart_load_ratios(file_obj, sheet_name):
         return df_final, d_labels
 
     except Exception as e:
-        # 如果出错，抛出异常信息供调试
         raise Exception(f"智能读取失败: {str(e)}")
 
 def find_row_fuzzy(df, keywords, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
     clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
+    
+    # 1. 优先：完全匹配（去除空格后）
+    # 这样 "EBITDA" 不会匹配到 "EBITDA利息保障倍数"
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask = clean_index == clean_kw 
         if mask.any(): return df.loc[df.index[mask][0]]
+        
+    # 2. 其次：包含匹配
     for kw in keywords:
         clean_kw = kw.replace(" ", "")
         mask = clean_index.str.contains(clean_kw, case=False, na=False)
         if mask.any(): return df.loc[df.index[mask][0]]
+        
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
@@ -357,7 +356,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                 text = (f"报告期内，发行人负债总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"{d_labels[1]}较{d_labels[2]}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；"
                         f"{d_labels[0]}发行人负债较{d_labels[1]}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"
-                        f"报告期内发行人的负债规模呈现{trend_desc}态势。\n\n"
+                        f"报告期内发行人的负债规模呈现{trend_desc}态势，主要原因为发行人（用户自行分析）。\n\n"
                         f"从负债结构来看，报告期内，流动负债分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%，"
                         f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
@@ -391,7 +390,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
-            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。"""
+            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.text_area(label="AI 指令", value=prompt, height=250, key=f"area_{subject}", label_visibility="collapsed")
 
@@ -426,7 +425,6 @@ def calculate_cash_flow_percentages(df_raw, d_labels):
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
-    
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
     for display_name, keywords in structure:
@@ -550,27 +548,28 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
 def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
-    targets = [
-        "资产负债率（%）",
-        "流动比率（倍）",
-        "速动比率（倍）",
-        "EBITDA（万元）",
-        "EBITDA利息保障倍数（倍）"
+    # 🔥 核心修正：使用映射表，(展示名称, [搜索关键词列表])
+    metrics_config = [
+        ("资产负债率（%）", ["资产负债率"]),
+        ("流动比率（倍）", ["流动比率"]),
+        ("速动比率（倍）", ["速动比率"]),
+        ("EBITDA（万元）", ["EBITDA", "息税折旧摊销前利润"]),
+        ("EBITDA利息保障倍数（倍）", ["EBITDA利息保障倍数", "利息保障倍数", "EBITDA利息倍数"])
     ]
     
     data_list = []
     data_map = {} 
     
-    for t in targets:
-        keywords = [t, t.replace("（", "(").replace("）", ")")]
-        row = find_row_fuzzy(df_raw, keywords)
+    for display_name, search_kws in metrics_config:
+        # 使用不带单位的关键词去模糊搜索
+        row = find_row_fuzzy(df_raw, search_kws)
         
         val_t, val_t1, val_t2 = 0, 0, 0
         if row.name is not None:
             val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
-            data_map[t] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
+            data_map[display_name] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
         
-        if "EBITDA（万元）" in t:
+        if "EBITDA（万元）" in display_name:
             fmt_t = f"{val_t:,.2f}"
             fmt_t1 = f"{val_t1:,.2f}"
             fmt_t2 = f"{val_t2:,.2f}"
@@ -579,7 +578,7 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
             fmt_t1 = f"{val_t1:.2f}"
             fmt_t2 = f"{val_t2:.2f}"
             
-        data_list.append([t, fmt_t, fmt_t1, fmt_t2])
+        data_list.append([display_name, fmt_t, fmt_t1, fmt_t2])
 
     df_display = pd.DataFrame(data_list, columns=["项目", d_t, d_t1, d_t2])
     df_display.set_index("项目", inplace=True)
