@@ -1,11 +1,3 @@
-好的，没问题。
-
-1. **关于文案显示**：我会取消“折叠框”，直接将 **Markdown 预览**（方便阅读）和 **代码框**（方便一键复制）上下并列展示，这样您既能看到排版效果，也能直接点击代码框右上角的复制按钮。
-2. **关于期间费用分析表格**：我会在“盈利能力分析”中新增一个标签页 `📊 期间费用分析`，专门按照您的要求生成“金额+占比”的分析表。
-
-以下是修改后的完整代码：
-
-```python
 import streamlit as st
 import pandas as pd
 import re
@@ -383,11 +375,12 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
             
-            # 🟢 [修改]：直接使用 markdown 展示文案 + 下方直接展示代码框（无折叠）
+            # 🟢 [修改]：不再使用 text_area，改用 container + markdown，包含一个复制代码块
             with st.container(border=True):
                 st.markdown(f"#### 📝 {analysis_name}综述文案")
                 st.markdown(text)
-                st.code(text, language='text')
+                with st.expander("复制代码"):
+                    st.code(text, language='text')
 
         except Exception as e:
              st.error(f"生成文案出错: {e}")
@@ -422,9 +415,10 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             if ctx:
                 analysis_text += f"\n\n【参考附注信息】\n{ctx}"
 
-            # 🟢 [修改]：Expander内直接展示 markdown + 代码框
+            # 🟢 [修改]：Expander内也不再使用 text_area，改用 markdown
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.markdown(analysis_text)
+                st.caption("👇 点击下方按钮复制代码")
                 st.code(analysis_text, language='text')
 
 # ================= 4. 业务逻辑：现金流量 =================
@@ -514,7 +508,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         fin_repay = find_row_fuzzy(df_raw, ["偿还债务支付的现金"])
         fin_interest = find_row_fuzzy(df_raw, ["分配股利、利润或偿付利息支付的现金"])
 
-        # 🟢 [修改]：改用 container + markdown + code
+        # 🟢 [修改]：改用 container + markdown，替代 text_area
         with st.container(border=True):
             st.markdown("#### 📝 1、经营活动产生的现金流量分析")
             text_op = (f"报告期内，发行人经营活动现金流入分别为{op_in_total['T_2']:,.2f}万元、{op_in_total['T_1']:,.2f}万元和{op_in_total['T']:,.2f}万元。\n\n"
@@ -533,7 +527,8 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
                       f"主要系【】所致。")
             st.markdown(text_op)
-            st.code(text_op, language='text')
+            with st.expander("复制代码"):
+                st.code(text_op, language='text')
 
         with st.container(border=True):
             st.markdown("#### 📝 2、投资活动产生的现金流量分析")
@@ -544,7 +539,8 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                       f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
                       f"发行人投资活动现金流量净额【】，主要是发行人【】所致。")
             st.markdown(text_inv)
-            st.code(text_inv, language='text')
+            with st.expander("复制代码"):
+                st.code(text_inv, language='text')
 
         with st.container(border=True):
             st.markdown("#### 📝 3、筹资活动产生的现金流量分析")
@@ -559,7 +555,8 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                        f"其中报告期内，发行人偿还债务支付的现金分别为{fin_repay['T_2']:,.2f}万元、{fin_repay['T_1']:,.2f}万元和{fin_repay['T']:,.2f}万元，"
                        f"分配股利、利润或偿付利息所支付的现金分别为{fin_interest['T_2']:,.2f}万元、{fin_interest['T_1']:,.2f}万元和{fin_interest['T']:,.2f}万元。")
             st.markdown(text_fin)
-            st.code(text_fin, language='text')
+            with st.expander("复制代码"):
+                st.code(text_fin, language='text')
 
     with tab4:
         st.info("💡 **提示**：已自动生成净现金流量变动分析文案草稿。")
@@ -578,23 +575,24 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"{d_t}，发行人{subject}较{d_t1}净{dir_curr}{abs(diff_curr):,.2f}万元。\n\n"
                      f"变动主要原因为：（请在此处补充具体的业务或资金变动原因）。")
             
-            # 🟢 [修改]：Expander内直接展示 markdown + 代码框
+            # 🟢 [修改]：Expander内改用 markdown
             with st.expander(f"📌 {subject}"):
                 st.markdown(cf_text)
+                st.caption("👇 点击下方按钮复制代码")
                 st.code(cf_text, language='text')
 
 # ================= 5. 业务逻辑：盈利能力分析 (NEW!) =================
 def process_profitability_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
-    # 1. 定义标准化的科目名称顺序
+    # 🟢 [重构]：1. 定义标准化的科目名称顺序
     standard_items = [
         "营业收入", "营业成本", "销售费用", "管理费用", "研发费用", "财务费用",
         "其他收益", "营业利润", "营业外收入", "营业外支出", "利润总额", "净利润",
         "营业毛利率", "平均总资产回报率"
     ]
 
-    # 2. 查找关键数据行 (使用更灵活的模糊匹配)
+    # 🟢 [重构]：2. 查找关键数据行 (使用更灵活的模糊匹配)
     def get_row_data(keywords, default_zero=True):
         row = find_row_fuzzy(df_raw, keywords)
         if row.name:
@@ -666,56 +664,9 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     for col in ['T', 'T_1', 'T_2']:
         r_val = rev_t if col == 'T' else (rev_t1 if col == 'T_1' else rev_t2)
         pe_ratios[col] = period_expenses[col] / r_val * 100 if r_val != 0 else 0.0
-    
-    # 🟢 [新增]：查找期间费用分析所需的所有费用行
-    idx_start = find_index_fuzzy(df_raw, ['营业总成本', '二、营业总成本'])
-    idx_end = find_index_fuzzy(df_raw, ['资产减值损失', '加：资产减值损失', '投资收益'])
-    
-    all_expense_rows = []
-    if idx_start and idx_end and idx_end > idx_start:
-        subset = df_raw.iloc[idx_start+1 : idx_end]
-        for i in range(len(subset)):
-            row = subset.iloc[i]
-            if "费用" in str(row.name):
-                all_expense_rows.append(row)
-    else:
-        # Fallback if structure not found
-        for kw in exp_items:
-             r = find_row_fuzzy(df_raw, [kw])
-             if r.name: all_expense_rows.append(r)
-
-    # 🟢 [新增]：构建期间费用分析表格数据
-    period_exp_data = []
-    for r in all_expense_rows:
-        row_dat = [r.name]
-        
-        # T (Latest)
-        val_t = r['T']
-        pct_t = val_t / rev_t * 100 if rev_t else 0
-        row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}%"])
-        
-        # T-1
-        val_t1 = r['T_1']
-        pct_t1 = val_t1 / rev_t1 * 100 if rev_t1 else 0
-        row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}%"])
-
-        # T-2
-        val_t2 = r['T_2']
-        pct_t2 = val_t2 / rev_t2 * 100 if rev_t2 else 0
-        row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}%"])
-        
-        period_exp_data.append(row_dat)
-    
-    pe_cols = ["项目", 
-               f"{d_t}金额", "占营业收入比例", 
-               f"{d_t1}金额", "占营业收入比例",
-               f"{d_t2}金额", "占营业收入比例"]
-    
-    df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
     # UI 展示
-    # 🟢 [修改]：新增 Tab 2 期间费用分析
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 盈利能力明细", "📊 期间费用分析", "📝 综述文案", "📝 变动分析文案"])
+    tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "📝 变动分析文案"])
 
     with tab1:
         c1, c2, c3 = st.columns([6, 1.2, 1.2]) 
@@ -727,21 +678,9 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             excel_file = create_excel_file(df_fmt)
             st.download_button("📥 下载 Excel", excel_file, "盈利能力表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.dataframe(df_fmt, use_container_width=True)
-    
-    # 🟢 [新增]：期间费用分析 Tab 内容
-    with tab2:
-        c1, c2, c3 = st.columns([6, 1.2, 1.2])
-        with c1: st.markdown("### 期间费用分析表")
-        with c2:
-            doc_file_pe = create_word_table_file(df_period_exp, title="期间费用分析表")
-            st.download_button("📥 下载 Word", doc_file_pe, "期间费用分析表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        with c3:
-            excel_file_pe = create_excel_file(df_period_exp)
-            st.download_button("📥 下载 Excel", excel_file_pe, "期间费用分析表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        st.dataframe(df_period_exp, use_container_width=True)
 
-    with tab3:
-        # 🟢 [修改]：改用 container + markdown + code
+    with tab2:
+        # 🟢 [修改]：改用 container + markdown，替代 text_area
         with st.container(border=True):
             st.markdown("#### 📝 1、营业收入、营业成本和毛利率分析")
             text_1 = (f"报告期内，发行人各期的营业收入分别为{rev_t2:,.2f}万元、{rev_t1:,.2f}万元和{rev_t:,.2f}万元，"
@@ -749,7 +688,8 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
                       f"营业毛利率分别为{margins['T_2']:.2f}%、{margins['T_1']:.2f}%和{margins['T']:.2f}%。\n\n"
                       f"发行人以（）为主要业务，主要业务毛利水平较稳定。")
             st.markdown(text_1)
-            st.code(text_1, language='text')
+            with st.expander("复制代码"):
+                st.code(text_1, language='text')
 
         with st.container(border=True):
             st.markdown("#### 📝 2、期间费用分析")
@@ -774,9 +714,10 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
                            f"占营业收入的比重分别为{pct_rev_t2:.2f}%、{pct_rev_t1:.2f}%和{pct_rev_t:.2f}%。\n\n")
             
             st.markdown(text_2)
-            st.code(text_2, language='text')
+            with st.expander("复制代码"):
+                st.code(text_2, language='text')
 
-    with tab4:
+    with tab3:
         st.info("💡 **提示**：已自动生成关键盈利指标变动分析文案草稿。")
         # 1. 收入分析
         diff_rev_prev = rev_t1 - rev_t2
@@ -785,9 +726,10 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
                     f"{d_t1}营业收入较{d_t2}变动{diff_rev_prev:,.2f}万元；\n"
                     f"{d_t}营业收入较{d_t1}变动{diff_rev_curr:,.2f}万元。\n"
                     f"变动主要原因为：（请结合业务规模、订单量、单价等因素分析）。")
-        # 🟢 [修改]：Expander内改用 markdown + code
+        # 🟢 [修改]：Expander内改用 markdown
         with st.expander("📌 营业收入"): 
             st.markdown(rev_text)
+            st.caption("👇 点击下方按钮复制代码")
             st.code(rev_text, language='text')
         
         # 2. 毛利率分析
@@ -795,6 +737,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
                        f"发行人毛利率变动主要系：（请结合成本波动、产品定价策略等因素分析）。")
         with st.expander("📌 毛利率"): 
             st.markdown(margin_text)
+            st.caption("👇 点击下方按钮复制代码")
             st.code(margin_text, language='text')
 
         # 3. 净利润分析
@@ -803,6 +746,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
                     f"净利润变动趋势与利润总额变动趋势一致，变动原因主要为：（请补充非经常性损益或税务影响等原因）。")
         with st.expander("📌 净利润"): 
             st.markdown(net_text)
+            st.caption("👇 点击下方按钮复制代码")
             st.code(net_text, language='text')
 
 
@@ -873,7 +817,7 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
         ebitda = data_map.get("EBITDA（万元）", {'T':0,'T_1':0,'T_2':0})
         int_cov = data_map.get("EBITDA利息保障倍数（倍）", {'T':0,'T_1':0,'T_2':0})
 
-        # 🟢 [修改]：改用 container + markdown + code
+        # 🟢 [修改]：改用 container + markdown，替代 text_area
         with st.container(border=True):
             st.markdown("#### 📝 偿债能力分析综述")
             
@@ -889,7 +833,8 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
                      f"发行人EBITDA利息保障倍数分别为{int_cov['T_2']:.2f}倍、{int_cov['T_1']:.2f}倍和{int_cov['T']:.2f}倍。")
             
             st.markdown(text)
-            st.code(text, language='text')
+            with st.expander("复制代码"):
+                st.code(text, language='text')
 
     with tab3:
         st.info("💡 **提示**：已自动生成关键指标变动分析文案草稿。")
@@ -908,9 +853,10 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
             analysis_text = (f"报告期各期，发行人{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n"
                            f"报告期内，发行人{name}{trend_text}，主要系：（请结合资产负债结构或盈利能力分析）。")
             
-            # 🟢 [修改]：Expander内改用 markdown + code
+            # 🟢 [修改]：Expander内改用 markdown
             with st.expander(f"📌 {name}"):
                 st.markdown(analysis_text)
+                st.caption("👇 点击下方按钮复制代码")
                 st.code(analysis_text, language='text')
 
 # ================= 3. 侧边栏 =================
@@ -1026,5 +972,3 @@ else:
         if df_profit is not None:
             process_profitability_tab(df_profit, word_data_list, d_labels)
         else: st.error(f"❌ 读取失败：{err}")
-
-```
