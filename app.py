@@ -16,17 +16,16 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= 2. 状态管理与回调函数 (新增) =================
-# 初始化 session state 用于控制显示逻辑
+# ================= 2. 状态管理与回调函数 =================
 if 'show_manual' not in st.session_state:
     st.session_state.show_manual = False
 
 def go_to_manual():
-    """点击说明书按钮时调用：强制显示说明书"""
+    """点击说明书按钮时调用"""
     st.session_state.show_manual = True
 
 def go_to_analysis():
-    """点击侧边栏选项或上传文件时调用：切换回分析界面"""
+    """点击侧边栏选项或上传文件时调用"""
     st.session_state.show_manual = False
 
 # ================= 3. 核心逻辑函数 =================
@@ -669,7 +668,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             
             val_t, val_t1, val_t2 = get_row_data(search_kws)
             
-            # 🟢 [修改]：如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
+            # 如果费用类科目三年均为0，则隐藏该行 (其他收益 已移除，确保显示)
             if item in ['销售费用', '管理费用', '研发费用', '财务费用', '营业外收入', '营业外支出']:
                 if val_t == 0 and val_t1 == 0 and val_t2 == 0:
                     continue
@@ -718,7 +717,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         for i in range(len(subset)):
             row = subset.iloc[i]
             if "费用" in str(row.name):
-                # 🟢 [修改]：排除 "利息费用"
+                # 排除 "利息费用"
                 if "利息" in str(row.name):
                     continue
                 all_expense_rows.append(row)
@@ -775,6 +774,51 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     
     df_period_exp = pd.DataFrame(period_exp_data, columns=pe_cols).set_index("项目")
 
+    # 🟢 [新增]：构建第二张表：期间费用占营业收入比例
+    period_exp_rev_data = []
+    # sum_t, sum_t1, sum_t2 已经在上面计算过了，可以直接复用
+
+    for r in all_expense_rows:
+        row_dat = [r.name]
+        
+        # T (Latest)
+        val_t = r['T']
+        pct_t = safe_pct(val_t, rev_t) # 使用 safe_pct 计算占营收比例
+        row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}"])
+        
+        # T-1
+        val_t1 = r['T_1']
+        pct_t1 = safe_pct(val_t1, rev_t1)
+        row_dat.extend([f"{val_t1:,.2f}", f"{pct_t1:.2f}"])
+
+        # T-2
+        val_t2 = r['T_2']
+        pct_t2 = safe_pct(val_t2, rev_t2)
+        row_dat.extend([f"{val_t2:,.2f}", f"{pct_t2:.2f}"])
+        
+        period_exp_rev_data.append(row_dat)
+    
+    # 添加合计行
+    total_row_rev = ["期间费用合计"]
+    total_pct_rev_t = safe_pct(sum_t, rev_t)
+    total_row_rev.extend([f"{sum_t:,.2f}", f"{total_pct_rev_t:.2f}"])
+    
+    total_pct_rev_t1 = safe_pct(sum_t1, rev_t1)
+    total_row_rev.extend([f"{sum_t1:,.2f}", f"{total_pct_rev_t1:.2f}"])
+    
+    total_pct_rev_t2 = safe_pct(sum_t2, rev_t2)
+    total_row_rev.extend([f"{sum_t2:,.2f}", f"{total_pct_rev_t2:.2f}"])
+    
+    period_exp_rev_data.append(total_row_rev)
+
+    # 定义列名
+    pe_rev_cols = ["项目", 
+               f"{d_t}金额", f"{d_t}占营收比例(%)", 
+               f"{d_t1}金额", f"{d_t1}占营收比例(%)",
+               f"{d_t2}金额", f"{d_t2}占营收比例(%)"]
+    
+    df_period_exp_rev = pd.DataFrame(period_exp_rev_data, columns=pe_rev_cols).set_index("项目")
+
     # UI 展示
     tab1, tab2, tab3, tab4 = st.tabs(["📋 盈利能力明细", "📊 期间费用分析", "📝 综述文案", "📝 变动分析文案"])
 
@@ -792,7 +836,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     # 期间费用分析 Tab 内容
     with tab2:
         c1, c2, c3 = st.columns([6, 1.2, 1.2])
-        with c1: st.markdown("### 期间费用分析表")
+        with c1: st.markdown("### 期间费用结构分析表（占期间费用比例）")
         st.info("💡 **说明**：系统已自动剔除“利息费用”（因其包含在“财务费用”中），避免重复计算期间费用合计。")
         with c2:
             doc_file_pe = create_word_table_file(df_period_exp, title="期间费用分析表")
@@ -801,6 +845,18 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
             excel_file_pe = create_excel_file(df_period_exp)
             st.download_button("📥 下载 Excel", excel_file_pe, "期间费用分析表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.dataframe(df_period_exp, use_container_width=True)
+
+        st.markdown("---") # 分割线
+
+        c4, c5, c6 = st.columns([6, 1.2, 1.2])
+        with c4: st.markdown("### 期间费用占营收分析表（占营业收入比例）")
+        with c5:
+            doc_file_rev = create_word_table_file(df_period_exp_rev, title="期间费用占营收分析表")
+            st.download_button("📥 下载 Word", doc_file_rev, "期间费用占营收表.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="btn_word_rev")
+        with c6:
+            excel_file_rev = create_excel_file(df_period_exp_rev)
+            st.download_button("📥 下载 Excel", excel_file_rev, "期间费用占营收表.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_excel_rev")
+        st.dataframe(df_period_exp_rev, use_container_width=True)
 
     with tab3:
         with st.container(border=True):
