@@ -16,7 +16,20 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= 2. 核心逻辑函数 =================
+# ================= 2. 状态管理与回调函数 (新增) =================
+# 初始化 session state 用于控制显示逻辑
+if 'show_manual' not in st.session_state:
+    st.session_state.show_manual = False
+
+def go_to_manual():
+    """点击说明书按钮时调用：强制显示说明书"""
+    st.session_state.show_manual = True
+
+def go_to_analysis():
+    """点击侧边栏选项或上传文件时调用：切换回分析界面"""
+    st.session_state.show_manual = False
+
+# ================= 3. 核心逻辑函数 =================
 
 def set_cell_border(cell, **kwargs):
     """设置单元格边框"""
@@ -725,7 +738,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
         # T (Latest)
         val_t = r['T']
         pct_t = val_t / period_expenses['T'] * 100 if period_expenses['T'] else 0
-        # 🟢 [修改]：把 % 放在表头，单元格内仅显示数字
+        # 把 % 放在表头，单元格内仅显示数字
         row_dat.extend([f"{val_t:,.2f}", f"{pct_t:.2f}"])
         sum_t += val_t
         
@@ -754,7 +767,7 @@ def process_profitability_tab(df_raw, word_data_list, d_labels):
     
     period_exp_data.append(total_row)
     
-    # 🟢 [修改]：表头增加 (%)
+    # 表头增加 (%)
     pe_cols = ["项目", 
                f"{d_t}金额", f"{d_t}占期间费用比例(%)", 
                f"{d_t1}金额", f"{d_t1}占期间费用比例(%)",
@@ -969,13 +982,18 @@ with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio(
         "请选择要生成的章节：", 
-        ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"]
+        ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"],
+        on_change=go_to_analysis # 点击后返回分析页
     )
     st.markdown("---")
     
-    uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"])
+    uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"], on_change=go_to_analysis)
     
-    # 💡 提示：Word 附注和高级设置已隐藏，系统将使用默认配置
+    st.markdown("---")
+    # 🟢 [新增]：使用说明书按钮
+    if st.button("📘 使用说明书", use_container_width=True):
+        go_to_manual()
+        st.rerun()
 
 # ================= 4. 主程序 =================
 
@@ -991,7 +1009,8 @@ SHEET_CONFIG = {
 }
 # ------------------------------------
 
-if not uploaded_excel:
+# 逻辑控制：没有上传文件 OR 点击了说明书按钮 -> 显示说明书
+if not uploaded_excel or st.session_state.show_manual:
     st.title("📊 财务分析报告自动化助手")
     st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
     st.markdown("""
@@ -1017,7 +1036,8 @@ if not uploaded_excel:
     2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / 变动分析文案**。
     3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
     """)
-    st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
+    if not uploaded_excel:
+        st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
 
 else:
     # ✅ 修复点 1：直接定义为空列表，不再尝试读取 uploaded_word_files
