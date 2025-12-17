@@ -163,20 +163,94 @@ def extract_date_label(header_str):
 def safe_pct(num, denom):
     return (num / denom * 100) if denom != 0 and pd.notna(num) and pd.notna(denom) else 0.0
 
-def fuzzy_load_excel(file_obj, sheet_name, header_row):
+def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
     try:
         xl = pd.ExcelFile(file_obj)
         all_sheet_names = xl.sheet_names
+        target_sheet = None
+        
+        # 1. 找 Sheet
         if sheet_name in all_sheet_names:
-            return pd.read_excel(file_obj, sheet_name=sheet_name, header=header_row), None
-        clean_target = sheet_name.replace(" ", "")
-        for actual_name in all_sheet_names:
-            if actual_name.replace(" ", "") == clean_target:
-                st.toast(f"⚠️ 检测到 Sheet 名称不一致，已自动修正为：'{actual_name}'")
-                return pd.read_excel(file_obj, sheet_name=actual_name, header=header_row), None
-        return None, all_sheet_names
+            target_sheet = sheet_name
+        else:
+            clean_target = sheet_name.replace(" ", "")
+            for actual_name in all_sheet_names:
+                if actual_name.replace(" ", "") == clean_target:
+                    target_sheet = actual_name
+                    st.toast(f"⚠️ 自动修正 Sheet 名为：'{actual_name}'")
+                    break
+        
+        if target_sheet is None:
+            return None, all_sheet_names
+
+        # 2. 如果是财务指标表，使用智能读取逻辑 (忽略 header_row 参数)
+        if "财务指标" in sheet_name or "5-3" in sheet_name:
+            return smart_load_ratios(file_obj, target_sheet)
+        
+        # 3. 普通表读取
+        return pd.read_excel(file_obj, sheet_name=target_sheet, header=header_row), None
+
     except Exception as e:
         return None, [str(e)]
+
+# 🔥 核心升级：智能读取财务指标表 (自动找表头，自动找列)
+def smart_load_ratios(file_obj, sheet_name):
+    try:
+        # 1. 先不带表头读取，扫描前 10 行找 "项目" 或 "指标"
+        df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None)
+        header_idx = -1
+        for i in range(10):
+            # 把这一行转成字符串，看是否包含关键词
+            row_values = df_raw.iloc[i].astype(str).values
+            if any("项目" in v or "指标" in v for v in row_values):
+                header_idx = i
+                break
+        
+        if header_idx == -1:
+            # 兜底：如果找不到，就默认用第 2 行 (Index 1)
+            header_idx = 1
+            
+        # 2. 重新读取，指定正确的表头行
+        df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_idx)
+        
+        # 3. 智能寻找 T, T-1, T-2 所在的列
+        # 规则：寻找包含 "年"、"期"、"T"、"20" 的列
+        cols = df.columns.tolist()
+        date_col_indices = []
+        item_col_idx = 0 # 默认第一列是项目
+        
+        for idx, col_name in enumerate(cols):
+            s = str(col_name)
+            if "年" in s or "T" in s or "202" in s or "期" in s:
+                date_col_indices.append(idx)
+        
+        # 如果找到至少 3 个日期列，取前 3 个
+        if len(date_col_indices) >= 3:
+            target_cols = [item_col_idx] + date_col_indices[:3]
+        else:
+            # 找不到就猜：通常是 第1列 + 第3,4,5列 (C,D,E) 或者是 (B,C,D)
+            # 根据用户报错 "Unnamed: 4" (Col E)，推测可能是 C, D, E
+            target_cols = [0, 2, 3, 4]
+            
+        df_final = df.iloc[:, target_cols]
+        
+        # 4. 标准化列名
+        orig_cols = df_final.columns.tolist()
+        d_labels = [extract_date_label(c) for c in orig_cols[1:]]
+        df_final.columns = ['科目', 'T', 'T_1', 'T_2']
+        
+        # 5. 清洗数据
+        df_final = df_final.dropna(subset=['科目'])
+        df_final['科目'] = df_final['科目'].astype(str).str.strip()
+        for c in ['T', 'T_1', 'T_2']:
+            df_final[c] = pd.to_numeric(df_final[c], errors='coerce').fillna(0)
+        df_final.set_index('科目', inplace=True)
+        
+        return df_final, d_labels
+
+    except Exception as e:
+        # 如果出错，抛出异常信息供调试
+        raise Exception(f"智能读取失败: {str(e)}")
 
 def find_row_fuzzy(df, keywords, default_val=None):
     if isinstance(keywords, str): keywords = [keywords]
@@ -256,7 +330,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
         st.dataframe(final_df, use_container_width=True)
 
     with tab2:
-        st.markdown("👇 **直接复制（已开启自动换行）：**")
         top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
         text = ""
         try:
@@ -284,7 +357,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                 text = (f"报告期内，发行人负债总额分别为{total_row['T_2']:,.2f}万元、{total_row['T_1']:,.2f}万元和{total_row['T']:,.2f}万元。\n\n"
                         f"{d_labels[1]}较{d_labels[2]}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；"
                         f"{d_labels[0]}发行人负债较{d_labels[1]}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"
-                        f"报告期内发行人的负债规模呈现{trend_desc}态势，主要原因为发行人（用户自行分析）。\n\n"
+                        f"报告期内发行人的负债规模呈现{trend_desc}态势。\n\n"
                         f"从负债结构来看，报告期内，流动负债分别为{curr_row['T_2']:,.2f}万元、{curr_row['T_1']:,.2f}万元和{curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(curr_row['T'], total_row['T']):.2f}%，"
                         f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
@@ -318,7 +391,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             dir_curr = "增加" if diff_curr >= 0 else "减少"
             label_curr = "增幅" if diff_curr >= 0 else "降幅"
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
-            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
+            if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。"""
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
                 st.text_area(label="AI 指令", value=prompt, height=250, key=f"area_{subject}", label_visibility="collapsed")
 
@@ -353,6 +426,7 @@ def calculate_cash_flow_percentages(df_raw, d_labels):
 
 def process_cash_flow_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
+    
     structure = [("经营活动产生的现金流量：", None), ("经营活动现金流入小计", ["经营活动现金流入小计"]), ("经营活动现金流出小计", ["经营活动现金流出小计"]), ("经营活动产生的现金流量净额", ["经营活动产生的现金流量净额"]), ("投资活动产生的现金流量：", None), ("投资活动现金流入小计", ["投资活动现金流入小计"]), ("投资活动现金流出小计", ["投资活动现金流出小计"]), ("投资活动产生的现金流量净额", ["投资活动产生的现金流量净额"]), ("筹资活动产生的现金流量：", None), ("筹资活动现金流入小计", ["筹资活动现金流入小计"]), ("筹资活动现金流出小计", ["筹资活动现金流出小计"]), ("筹资活动产生的现金流量净额", ["筹资活动产生的现金流量净额"]), ("现金及现金等价物净增加额", ["现金及现金等价物净增加额"])]
     data_list = []
     for display_name, keywords in structure:
@@ -390,7 +464,6 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
         st.dataframe(df_pct, use_container_width=True)
 
     with tab3:
-        st.markdown("👇 **直接复制（分块展示）：**")
         op_in_total = find_row_fuzzy(df_raw, ["经营活动现金流入小计"])
         op_out_total = find_row_fuzzy(df_raw, ["经营活动现金流出小计"])
         op_net = find_row_fuzzy(df_raw, ["经营活动产生的现金流量净额"])
@@ -418,16 +491,16 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"占经营活动现金流入的{safe_pct(op_sales['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_sales['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_sales['T'], op_in_total['T']):.2f}%；\n\n"
                      f"收到其他与经营活动有关的现金分别为{op_other_in['T_2']:,.2f}万元、{op_other_in['T_1']:,.2f}万元及{op_other_in['T']:,.2f}万元，"
                      f"占经营活动现金流入的{safe_pct(op_other_in['T_2'], op_in_total['T_2']):.2f}%、{safe_pct(op_other_in['T_1'], op_in_total['T_1']):.2f}%及{safe_pct(op_other_in['T'], op_in_total['T']):.2f}%。"
-                     f"发行人收到其他与经营活动有关的现金主要包括利息收入、营业外收入、往来款。\n\n")
+                     f"发行人收到其他与经营活动有关的现金主要包括（）。\n\n")
             text_op += (f"报告期内，发行人经营活动现金流出分别为{op_out_total['T_2']:,.2f}万元、{op_out_total['T_1']:,.2f}万元和{op_out_total['T']:,.2f}万元。\n\n"
                      f"报告期内，发行人经营活动现金流出主要来源于购买商品、接受劳务支付的现金和支付其他与经营活动有关的现金。"
                      f"报告期内，发行人购买商品、接受劳务支付的现金分别为{op_buy['T_2']:,.2f}万元、{op_buy['T_1']:,.2f}万元及{op_buy['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_buy['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_buy['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_buy['T'], op_out_total['T']):.2f}%。\n\n"
                      f"发行人支付其他与经营活动有关的现金分别为{op_other_out['T_2']:,.2f}万元、{op_other_out['T_1']:,.2f}万元及{op_other_out['T']:,.2f}万元，"
                      f"占经营活动现金流出的{safe_pct(op_other_out['T_2'], op_out_total['T_2']):.2f}%、{safe_pct(op_other_out['T_1'], op_out_total['T_1']):.2f}%及{safe_pct(op_other_out['T'], op_out_total['T']):.2f}%。"
-                     f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
+                     f"支付其他与经营活动有关的现金包括：（）等。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
-                     f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
+                     f"主要系（）所致。")
             st.text_area("文案内容", value=text_op, height=350, label_visibility="collapsed", key="txt_op")
 
         # Box 2
@@ -438,7 +511,7 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"投资活动现金流出分别为{inv_out_total['T_2']:,.2f}万元、{inv_out_total['T_1']:,.2f}万元及{inv_out_total['T']:,.2f}万元，"
                      f"其中购建固定资产、无形资产和其他长期资产支付的现金分别为{inv_buy_asset['T_2']:,.2f}万元、{inv_buy_asset['T_1']:,.2f}万元及{inv_buy_asset['T']:,.2f}万元，"
                      f"占投资活动现金流出的{safe_pct(inv_buy_asset['T_2'], inv_out_total['T_2']):.2f}%、{safe_pct(inv_buy_asset['T_1'], inv_out_total['T_1']):.2f}%及{safe_pct(inv_buy_asset['T'], inv_out_total['T']):.2f}%。\n\n"
-                     f"发行人投资活动现金流量净额持续为负，主要是发行人购建固定资产、无形资产和其他长期资产支付的现金持续流出，而同期投资活动产生的现金流流入较小所致。")
+                     f"发行人投资活动现金流量净额（），主要是发行人（）所致。")
             st.text_area("文案内容", value=text_inv, height=250, label_visibility="collapsed", key="txt_inv")
 
         # Box 3
@@ -477,7 +550,6 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
 def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
     d_t, d_t1, d_t2 = d_labels
     
-    # 1. 定义要抓取的指标
     targets = [
         "资产负债率（%）",
         "流动比率（倍）",
@@ -486,12 +558,10 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
         "EBITDA利息保障倍数（倍）"
     ]
     
-    # 2. 提取数据
     data_list = []
-    data_map = {} # 用于文案生成
+    data_map = {} 
     
     for t in targets:
-        # 模糊查找（兼容中文括号和英文括号）
         keywords = [t, t.replace("（", "(").replace("）", ")")]
         row = find_row_fuzzy(df_raw, keywords)
         
@@ -500,14 +570,11 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
             val_t, val_t1, val_t2 = row['T'], row['T_1'], row['T_2']
             data_map[t] = {'T': val_t, 'T_1': val_t1, 'T_2': val_t2}
         
-        # 格式化逻辑
         if "EBITDA（万元）" in t:
-            # 金额格式：1,234.56
             fmt_t = f"{val_t:,.2f}"
             fmt_t1 = f"{val_t1:,.2f}"
             fmt_t2 = f"{val_t2:,.2f}"
         else:
-            # 比率格式：1.23 (直接保留两位小数)
             fmt_t = f"{val_t:.2f}"
             fmt_t1 = f"{val_t1:.2f}"
             fmt_t2 = f"{val_t2:.2f}"
@@ -531,8 +598,6 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
         st.dataframe(df_display, use_container_width=True)
 
     with tab2:
-        # 准备数据用于文案
-        # 注意：这里需要处理 key 不存在的情况（虽然上面逻辑应该能保证）
         alr = data_map.get("资产负债率（%）", {'T':0,'T_1':0,'T_2':0})
         cr = data_map.get("流动比率（倍）", {'T':0,'T_1':0,'T_2':0})
         qr = data_map.get("速动比率（倍）", {'T':0,'T_1':0,'T_2':0})
@@ -542,16 +607,13 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
         with st.container(border=True):
             st.markdown("#### 📝 偿债能力分析综述")
             
-            # 1. 资产负债率
             text = f"1、资产负债率\n\n"
             text += f"报告期内，发行人的资产负债率分别为{alr['T_2']:.2f}%、{alr['T_1']:.2f}%和{alr['T']:.2f}%。\n\n"
             
-            # 2. 流动比率及速动比率
             text += f"2、流动比率及速动比率\n\n"
             text += (f"报告期内，发行人的流动比率分别为{cr['T_2']:.2f}倍、{cr['T_1']:.2f}倍和{cr['T']:.2f}倍；"
                      f"同期速动比率分别为{qr['T_2']:.2f}倍、{qr['T_1']:.2f}倍和{qr['T']:.2f}倍。\n\n")
             
-            # 3. EBITDA
             text += f"3、EBITDA利息保障倍数\n\n"
             text += (f"报告期内，发行人EBITDA分别为{ebitda['T_2']:,.2f}万元、{ebitda['T_1']:,.2f}万元和{ebitda['T']:,.2f}万元，"
                      f"发行人EBITDA利息保障倍数分别为{int_cov['T_2']:.2f}倍、{int_cov['T_1']:.2f}倍和{int_cov['T']:.2f}倍。")
@@ -560,17 +622,13 @@ def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
 
     with tab3:
         st.info("💡 **提示**：财务指标的变动通常需要结合资产负债结构和盈利能力进行综合分析。")
-        
-        # 针对每个指标生成简单指令
         prompts = [
             ("资产负债率", alr, "分析偿债风险变化"),
             ("流动比率", cr, "分析短期偿债能力"),
             ("EBITDA", ebitda, "分析盈利及获现能力")
         ]
-        
         for name, data, task in prompts:
             prompt = f"""【任务】{task}：{name}\n\n【数据表现】\n{d_t2}、{d_t1}及{d_t}，{name}分别为{data['T_2']:.2f}、{data['T_1']:.2f}和{data['T']:.2f}。\n\n【分析要求】\n结合企业经营情况，分析指标变动的原因。"""
-            
             with st.expander(f"📌 {name}"):
                 st.text_area("AI 指令", value=prompt, height=200, label_visibility="collapsed")
 
@@ -666,10 +724,12 @@ else:
         else: st.error(f"❌ 读取失败：{err}")
 
     elif analysis_page == "(四) 财务指标分析":
-        df_ratios, d_labels, err = get_clean_data(sheet_ratios)
+        # 🔥 使用智能读取器，不依赖 get_clean_data
+        df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, sheet_ratios, header_row) # 这里 header_row 其实被忽略了
         if df_ratios is not None:
             process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
-        else: st.error(f"❌ 读取失败：{err}")
+        else: 
+            st.error(f"❌ 读取失败：未找到 Sheet '{sheet_ratios}'")
 
     else:
         st.info("🚧 该模块正在施工中，敬请期待后续更新...")
