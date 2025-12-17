@@ -114,29 +114,67 @@ def create_excel_file(df):
     output.seek(0)
     return output
 
+# 🔥 核心升级 1：同时读取段落和表格内容
 def load_single_word(file_obj):
     try:
         file_obj.seek(0)
         doc = Document(file_obj)
-        full_text = [p.text.strip() for p in doc.paragraphs if len(p.text.strip()) > 5]
+        full_text = []
+        
+        # 1. 读取所有段落文本
+        for p in doc.paragraphs:
+            txt = p.text.strip()
+            if len(txt) > 2: # 稍微放宽限制，避免漏掉短标题
+                full_text.append(txt)
+        
+        # 2. 🔥 读取所有表格文本 (关键更新)
+        # 将表格每一行拼接成 "Cell1 | Cell2 | Cell3" 的格式，方便搜索
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if row_text:
+                    full_text.append(" | ".join(row_text))
+            full_text.append("\n") # 表格之间加个空行
+            
         return "\n".join(full_text), True, ""
     except Exception as e:
         return "", False, f"❌ 读取失败: {str(e)}"
 
+# 🔥 核心升级 2：搜索所有出现的位置，而不仅仅是第一个
 def find_context(subject, word_data_list):
     if not word_data_list: return ""
     clean_sub = subject.replace(" ", "")
     found_contexts = []
+    
     for item in word_data_list:
         content = item['content']
         source = item['source']
-        idx = content.find(clean_sub)
-        if idx != -1:
-            start = max(0, idx - 600)
-            end = min(len(content), idx + 1200)
-            ctx = content[start:end].replace('\n', ' ')
-            found_contexts.append(f"📄 **来源：{source}**\n{ctx}")
-    return "\n\n".join(found_contexts)
+        
+        # 使用正则表达式查找所有匹配项的索引
+        # re.finditer 会返回一个迭代器，包含所有匹配对象
+        matches = list(re.finditer(re.escape(clean_sub), content))
+        
+        if matches:
+            # 限制只取前 3 个匹配项，防止内容过多 (通常目录是第一个，正文是第二个)
+            top_matches = matches[:3] 
+            
+            file_context = []
+            for m in top_matches:
+                idx = m.start()
+                # 截取前后文：前 300 字符，后 800 字符
+                start = max(0, idx - 300)
+                end = min(len(content), idx + 800)
+                
+                # 简单的文本清理
+                ctx = content[start:end].replace('\n', ' ')
+                file_context.append(f"...{ctx}...")
+            
+            # 合并该文件下的所有线索
+            combined_ctx = "\n\n----------\n\n".join(file_context)
+            found_contexts.append(f"📄 **来源：{source}**\n{combined_ctx}")
+            
+    if not found_contexts: return "（未检索到相关附注）"
+    return "\n\n====================\n\n".join(found_contexts)
 
 def extract_date_label(header_str):
     s = str(header_str).strip()
@@ -276,8 +314,6 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
                         f"主要由 **{'、'.join(top_5)}** 等构成；\n\n"
                         f"非流动负债分别为{non_curr_row['T_2']:,.2f}万元、{non_curr_row['T_1']:,.2f}万元和{non_curr_row['T']:,.2f}万元，"
                         f"占负债总额比例分别为{safe_pct(non_curr_row['T_2'], total_row['T_2']):.2f}%、{safe_pct(non_curr_row['T_1'], total_row['T_1']):.2f}%和{safe_pct(non_curr_row['T'], total_row['T']):.2f}%。")
-            
-            # 🔥 替换 st.code 为 st.text_area
             st.text_area("文案内容", value=text, height=350, help="按 Ctrl+A 全选，Ctrl+C 复制")
         except Exception as e:
              st.error(f"生成文案出错: {e}")
@@ -303,8 +339,7 @@ def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, 
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}余额分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元，占{denom_text}的比例分别为{row['占比_T_2']*100:.2f}%、{row['占比_T_1']*100:.2f}%和{row['占比_T']*100:.2f}%。\n\n【2. 变动情况】\n截至{d_t1}，发行人{subject}较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元，{label_prev}{abs(pct_prev):.2f}%；\n截至{d_t}，发行人{subject}较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元，{label_curr}{abs(pct_curr):.2f}%。"""
             if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。如附注未提及，写“主要系业务规模变动所致”。"""
             with st.expander(f"📌 {subject} (占比 {row['占比_T']:.2%} @ {latest_date_label})"):
-                # 🔥 替换 st.code 为 st.text_area
-                st.text_area(label="分析指令", value=prompt, height=250, key=f"area_{subject}", help="按 Ctrl+A 全选，Ctrl+C 复制")
+                st.text_area(label="AI 指令", value=prompt, height=250, key=f"area_{subject}", help="按 Ctrl+A 全选，Ctrl+C 复制")
 
 # ================= 4. 业务逻辑：现金流量 =================
 def calculate_cash_flow_percentages(df_raw, d_labels):
@@ -412,8 +447,6 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
                      f"支付其他与经营活动有关的现金包括：管理费用、财务费用、营业外支出、往来款等。\n\n")
             text_op += (f"报告期内，发行人经营活动产生的现金流量净额分别为{op_net['T_2']:,.2f}万元、{op_net['T_1']:,.2f}万元和{op_net['T']:,.2f}万元，"
                      f"主要系销售商品、提供劳务收到的现金减少，收到其他与经营活动有关的现金减少，以及购买商品、接受劳务支付的现金增多所致。")
-            
-            # 🔥 替换 st.code 为 st.text_area
             st.text_area("文案 - 经营活动", value=text_op, height=350, key="txt_op", help="Ctrl+A 全选")
 
         # Box 2
@@ -455,7 +488,6 @@ def process_cash_flow_tab(df_raw, word_data_list, d_labels):
             prompt = f"""【任务】分析“{subject}”变动原因。\n\n【1. 数据趋势】\n{d_t2}、{d_t1}及{d_t}，发行人{subject}分别为{row['T_2']:,.2f}万元、{row['T_1']:,.2f}万元和{row['T']:,.2f}万元。\n\n【2. 变动情况】\n截至{d_t1}，较{d_t2}{dir_prev}{abs(diff_prev):,.2f}万元；\n截至{d_t}，较{d_t1}{dir_curr}{abs(diff_curr):,.2f}万元。"""
             if word_data_list: prompt += f"""\n\n【3. 附注线索】\n{find_context(subject, word_data_list)}\n\n【4. 写作要求】\n结合数据和附注分析原因。"""
             with st.expander(f"📌 {subject}"):
-                # 🔥 替换 st.code 为 st.text_area
                 st.text_area(label="AI 指令", value=prompt, height=200, key=f"cf_prompt_{subject}", help="Ctrl+A 全选")
 
 # ================= 3. 侧边栏 =================
