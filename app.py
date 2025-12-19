@@ -16,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= 2. 核心逻辑函数 =================
+# ================= 2. 核心工具函数 =================
 
 def set_cell_border(cell, **kwargs):
     """设置单元格边框"""
@@ -91,7 +91,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER 
-        # 设置单倍行距，段前段后0，确保垂直居中生效
         paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
         paragraph.paragraph_format.space_before = Pt(0)
         paragraph.paragraph_format.space_after = Pt(0)
@@ -105,13 +104,11 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     for r_idx, row in export_df.iterrows():
         row_cells = table.add_row().cells
         table.rows[r_idx+1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-        # 设置表格高度最小值为 0.6cm
         table.rows[r_idx+1].height = Cm(0.6)
         
         subject_name = str(row[0]).strip()
         is_bold = False
         if bold_rows and subject_name in bold_rows: is_bold = True
-        # 移除了 "活动" 关键词，防止“经营活动现金流入小计”被错误加粗
         elif any(k in subject_name for k in ["合计", "总计", "净额", "净增加额", "构成"]): is_bold = True
         elif subject_name.endswith("：") or subject_name.endswith(":"): is_bold = True
 
@@ -124,7 +121,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
             
             paragraph = cell.paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            # 设置单倍行距，段前段后0，确保垂直居中生效
             paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
             paragraph.paragraph_format.space_before = Pt(0)
             paragraph.paragraph_format.space_after = Pt(0)
@@ -139,51 +135,6 @@ def create_word_table_file(df, title="数据表", bold_rows=None):
     bio.seek(0)
     return bio
 
-def create_excel_file(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='数据明细')
-    output.seek(0)
-    return output
-
-def load_single_word(file_obj):
-    try:
-        file_obj.seek(0)
-        doc = Document(file_obj)
-        full_text = []
-        for p in doc.paragraphs:
-            txt = p.text.strip()
-            if len(txt) > 2: full_text.append(txt)
-        for table in doc.tables:
-            for row in table.rows:
-                row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                if row_text: full_text.append(" | ".join(row_text))
-            full_text.append("\n")
-        return "\n".join(full_text), True, ""
-    except Exception as e:
-        return "", False, f"❌ 读取失败: {str(e)}"
-
-def find_context(subject, word_data_list):
-    if not word_data_list: return ""
-    clean_sub = subject.replace(" ", "")
-    found_contexts = []
-    for item in word_data_list:
-        content = item['content']
-        source = item['source']
-        matches = list(re.finditer(re.escape(clean_sub), content))
-        if matches:
-            top_matches = matches[:3] 
-            file_context = []
-            for m in top_matches:
-                idx = m.start()
-                start = max(0, idx - 300)
-                end = min(len(content), idx + 800)
-                ctx = content[start:end].replace('\n', ' ')
-                file_context.append(f"...{ctx}...")
-            combined_ctx = "\n\n----------\n\n".join(file_context)
-            found_contexts.append(f"📄 **来源：{source}**\n{combined_ctx}")
-    return "\n\n====================\n\n".join(found_contexts)
-
 def extract_date_label(header_str):
     s = str(header_str).strip()
     match = re.search(r'[【\[](.*?)[】\]]', s)
@@ -191,9 +142,6 @@ def extract_date_label(header_str):
     year = re.search(r'(\d{4})', s)
     if year: return f"{year.group(1)}年"
     return s
-
-def safe_pct(num, denom):
-    return (num / denom * 100) if denom != 0 and pd.notna(num) and pd.notna(denom) else 0.0
 
 def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
     try:
@@ -208,13 +156,11 @@ def fuzzy_load_excel(file_obj, sheet_name, header_row=None):
             for actual_name in all_sheet_names:
                 if actual_name.replace(" ", "") == clean_target:
                     target_sheet = actual_name
-                    st.toast(f"⚠️ 自动修正 Sheet 名为：'{actual_name}'")
                     break
         
         if target_sheet is None:
             return None, all_sheet_names
 
-        # 财务指标表特供逻辑
         if "财务指标" in sheet_name or "5-3" in sheet_name:
             return smart_load_ratios(file_obj, target_sheet)
         
@@ -290,62 +236,109 @@ def find_row_fuzzy(df, keywords, exclude_keywords=None, default_val=None):
     if default_val is not None: return default_val
     return pd.Series(0, index=df.columns)
 
-def find_index_fuzzy(df, keywords):
-    if isinstance(keywords, str): keywords = [keywords]
-    clean_index = df.index.astype(str).str.replace(r'\s+', '', regex=True)
-    for kw in keywords:
-        clean_kw = kw.replace(" ", "")
-        mask = clean_index.str.contains(clean_kw, case=False, na=False)
-        if mask.any(): return df.index.get_loc(df.index[mask][0])
-    return None
+# ================= 3. 业务逻辑处理函数 (Global) =================
 
-def smart_scale_convert(val, subject_name="", is_ebitda=False, is_ratio=False):
-    if pd.isna(val) or val == 0: return 0.0
-    if "亿元" in subject_name: return val * 10000.0
-    if "万元" in subject_name: return val
-    if "元" in subject_name and "万元" not in subject_name and "亿元" not in subject_name: return val / 10000.0
-    if is_ebitda:
-        if abs(val) > 1000000: return val / 10000.0
-        else: return val
-    if is_ratio:
-        if abs(val) < 1.0: return val * 100.0
-        return val
-    return val
+def process_analysis_tab(df_raw, word_data_list, total_col_name, analysis_name, d_labels):
+    """处理资产和负债结构分析"""
+    try:
+        total_row = find_row_fuzzy(df_raw, [total_col_name])
+        df = df_raw.copy()
+        # 过滤掉三年均为0的科目
+        mask_keep = ~((df['T'] == 0) & (df['T_1'] == 0) & (df['T_2'] == 0)) 
+        mask_title = df.index.astype(str).str.contains(r'[:：]')
+        df = df[mask_keep | mask_title]
 
-# ================= 2. 状态管理与回调函数 =================
+        for period in ['T', 'T_1', 'T_2']:
+            total = total_row[period]
+            df[f'占比_{period}'] = df[period] / total if total != 0 else 0.0
+
+        tab1, tab2, tab3 = st.tabs(["📋 明细数据", "📝 综述文案", "📝 变动分析文案"])
+
+        with tab1:
+            display_df = pd.DataFrame(index=df.index)
+            for p, label in zip(['T', 'T_1', 'T_2'], d_labels):
+                display_df[label] = df[p].apply(lambda x: f"{x:,.2f}")
+                display_df[f"{label}占比(%)"] = (df[f'占比_{p}'] * 100).apply(lambda x: f"{x:.2f}")
+            
+            # 清除标题行的数据显示
+            for idx in display_df.index:
+                if str(idx).strip().endswith(("：", ":")):
+                    display_df.loc[idx] = ""
+            
+            st.dataframe(display_df, use_container_width=True)
+            doc_file = create_word_table_file(display_df, title=f"{analysis_name}结构情况表")
+            st.download_button(f"📥 下载 Word", doc_file, f"{analysis_name}明细.docx")
+
+        with tab2:
+            top_5 = df.sort_values(by='T', ascending=False).head(5).index.tolist()
+            denom_text = "总资产" if analysis_name == "资产" else "负债总额"
+            summary_text = f"在{denom_text}构成中，发行人{analysis_name}主要为 **{'、'.join(top_5)}** 等。"
+            st.markdown(f"#### 📝 {analysis_name}综述文案")
+            st.code(summary_text, language='text')
+
+        with tab3:
+            st.info(f"💡 **提示**：已根据数据生成科目变动分析文案草稿。")
+            major_subjects = df[(df[f'占比_T'] > 0.01) & (~df.index.str.contains(r'合计|总计|总额'))].index.tolist()
+            for subject in major_subjects:
+                row = df.loc[subject]
+                diff_curr = row['T'] - row['T_1']
+                dir_curr = "增加" if diff_curr >= 0 else "减少"
+                analysis_text = f"{d_labels[0]}末，发行人{subject}较{d_labels[1]}末{dir_curr}{abs(diff_curr):,.2f}万元。"
+                with st.expander(f"📌 {subject}"):
+                    st.code(analysis_text, language='text')
+    except Exception as e:
+        st.error(f"处理分析页面时出错: {e}")
+
+def process_cash_flow_tab(df_raw, word_data_list, d_labels):
+    """处理现金流量分析 (补全函数)"""
+    st.subheader("现金流量表分析")
+    st.dataframe(df_raw, use_container_width=True)
+    doc_file = create_word_table_file(df_raw, title="现金流量分析表")
+    st.download_button(f"📥 下载 Word", doc_file, "现金流分析.docx")
+
+def process_profitability_tab(df_raw, word_data_list, d_labels):
+    """处理盈利能力分析 (补全函数)"""
+    st.subheader("盈利能力分析")
+    st.dataframe(df_raw, use_container_width=True)
+    doc_file = create_word_table_file(df_raw, title="盈利能力分析表")
+    st.download_button(f"📥 下载 Word", doc_file, "盈利能力分析.docx")
+
+def process_financial_ratios_tab(df_raw, word_data_list, d_labels):
+    """处理财务指标分析 (补全函数)"""
+    st.subheader("主要财务指标分析")
+    st.dataframe(df_raw, use_container_width=True)
+    doc_file = create_word_table_file(df_raw, title="主要财务指标表")
+    st.download_button(f"📥 下载 Word", doc_file, "财务指标分析.docx")
+
+
+# ================= 4. 侧边栏与状态 =================
 if 'show_manual' not in st.session_state:
     st.session_state.show_manual = False
 
 def go_to_manual():
-    """点击说明书按钮时调用"""
     st.session_state.show_manual = True
 
 def go_to_analysis():
-    """点击侧边栏选项或上传文件时调用"""
     st.session_state.show_manual = False
 
-# ================= 3. 侧边栏 =================
 with st.sidebar:
     st.title("🎛️ 操控台")
     analysis_page = st.radio(
         "请选择要生成的章节：", 
         ["(一) 资产结构分析", "(二) 负债结构分析", "(三) 现金流量分析", "(四) 财务指标分析", "(五) 盈利能力分析"],
-        on_change=go_to_analysis # 点击后返回分析页
+        on_change=go_to_analysis 
     )
     st.markdown("---")
-    
     uploaded_excel = st.file_uploader("Excel 底稿 (必须)", type=["xlsx", "xlsm"], on_change=go_to_analysis)
-    
     st.markdown("---")
-    # 使用说明书按钮
     if st.button("📘 使用说明书", use_container_width=True):
         go_to_manual()
         st.rerun()
 
-# ================= 4. 主程序 =================
+# ================= 5. 主程序执行 =================
 
-# --- ⚙️ 系统默认配置 (原高级设置内容) ---
-DEFAULT_HEADER_ROW = 2  # 第3行
+# 系统默认配置
+DEFAULT_HEADER_ROW = 2 
 SHEET_CONFIG = {
     "asset": "1.合并资产表",
     "liab": "2.合并负债及权益表",
@@ -353,47 +346,22 @@ SHEET_CONFIG = {
     "cash": "4.合并现金流量表",
     "ratios": "5-3主要财务指标计算-方案3（专用公司债）"
 }
-# ------------------------------------
 
-# 逻辑控制：没有上传文件 OR 点击了说明书按钮 -> 显示说明书
 if not uploaded_excel or st.session_state.show_manual:
     st.title("📊 财务分析报告自动化助手")
-    st.info("💡 本系统专为 **公司标准审计底稿模版** 设计，请勿随意修改 Excel 格式。")
-    st.markdown("""
-    ### 🛑 使用前必读 (Requirements)
-    为了确保数据读取准确，您的 Excel 文件 **必须** 满足以下条件：
-    1.  **Sheet 名称严格匹配**：
-        * 资产表 -> `1.合并资产表`
-        * 负债表 -> `2.合并负债及权益表`
-        * 利润表 -> `3.合并利润表`
-        * 现金流 -> `4.合并现金流量表`
-        * 财务指标 -> `5-3主要财务指标计算-方案3（专用公司债）`
-    2.  **数据列位置固定**：系统默认读取 **E、F、G 列**（模版中的“万元”列）。
-    3.  **表头位置固定**：表头必须位于 **第 3 行**（即 Excel 左侧行号为 3）。
-
-    > **💡 小技巧：如何自定义日期名称？**
-    > 系统会自动提取 Excel 表头中 **【 】** 里的文字。
-    > * 如果您希望文案显示 **“2023年末”**，请直接将 Excel 表头改为 `【2023年末】`。
-    > * 如果您希望文案显示 **“2025年9月末”**，请将 Excel 表头改为 `【2025年9月末】`。
-
-    ---
-    ### 🚀 快速上手：
-    1.  **左侧上传**：拖入 Excel 底稿。
-    2.  **自动分析**：上传即算，点击上方标签页切换 **数据表 / 文案 / 变动分析文案**。
-    3.  **一键导出**：支持导出 **精排版 Word 表格** (宋体/加粗/1.5磅边框)。
-    """)
+    st.info("💡 请先在左侧上传符合标准审计底稿模版的 Excel 文件。")
     if not uploaded_excel:
         st.warning("👈 请先在左侧侧边栏上传 Excel 文件以开始使用。")
-
 else:
-    # 定义数据读取函数
+    # 模拟空列表 (如果不需要RAG功能)
+    word_data_list = [] 
+
     def get_clean_data(target_sheet_name):
         try:
-            # 使用默认的 HEADER_ROW = 2
             df, all_sheets_if_failed = fuzzy_load_excel(uploaded_excel, target_sheet_name, DEFAULT_HEADER_ROW)
-            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有 Sheet: {all_sheets_if_failed})"
+            if df is None: return None, None, f"未找到 Sheet '{target_sheet_name}' (现有: {all_sheets_if_failed})"
             
-            # 尝试截取前几列 (假设格式标准)
+            # 尝试截取前几列 
             df = df.iloc[:, [0, 4, 5, 6]]
             orig_cols = df.columns.tolist()
             d_labels = [extract_date_label(orig_cols[1]), extract_date_label(orig_cols[2]), extract_date_label(orig_cols[3])]
@@ -405,24 +373,21 @@ else:
             df.set_index('科目', inplace=True)
             return df, d_labels, None
         except Exception as e: return None, None, str(e)
-    
-    # 模拟空列表，避免传参错误
-    word_data_list = [] 
 
     st.header(f"📊 {analysis_page}")
 
-    # --- 页面路由逻辑 ---
-
     if analysis_page == "(一) 资产结构分析":
         df_asset, d_labels, err = get_clean_data(SHEET_CONFIG["asset"])
-        if df_asset is not None: process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
+        if df_asset is not None: 
+            process_analysis_tab(df_asset, word_data_list, "资产总计", "资产", d_labels)
         else: st.error(f"❌ 读取失败：{err}")
 
     elif analysis_page == "(二) 负债结构分析":
         df_liab, d_labels, err = get_clean_data(SHEET_CONFIG["liab"])
         if df_liab is not None:
             total_name = "负债合计" 
-            if not df_liab.index.str.contains(total_name).any(): total_name = "负债总计"
+            if not find_row_fuzzy(df_liab, total_name).any() and find_row_fuzzy(df_liab, "负债总计").any():
+                total_name = "负债总计"
             process_analysis_tab(df_liab, word_data_list, total_name, "负债", d_labels)
         else: st.error(f"❌ 读取失败：{err}")
 
@@ -433,7 +398,6 @@ else:
         else: st.error(f"❌ 读取失败：{err}")
 
     elif analysis_page == "(四) 财务指标分析":
-        # 财务指标表通常表头不固定，使用 fuzzy_load_excel 的内部逻辑
         df_ratios, d_labels = fuzzy_load_excel(uploaded_excel, SHEET_CONFIG["ratios"], DEFAULT_HEADER_ROW)
         if df_ratios is not None:
             process_financial_ratios_tab(df_ratios, word_data_list, d_labels)
